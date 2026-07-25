@@ -9,7 +9,7 @@ st.set_page_config(
 
 st.title("💰 마켓별 판매가 자동 계산기")
 st.write(
-    "전산 상품명을 키워드(띄어쓰기)로 부분 검색하여 선택하거나, 매입위안을 직접 입력해 마켓별 판매가를 산출하세요."
+    "전산 상품명을 키워드로 부분 검색하여 선택하거나, 매입위안을 직접 입력해 마켓별 판매가를 산출하세요."
 )
 
 # ------------------------------------------------------------------
@@ -54,6 +54,7 @@ st.subheader("1. 상품 검색 및 선택")
 selected_product_name = ""
 yuan_price = 0.0
 smartstore_url = ""
+db_selling_price = 0  # 전산 DB에 등록되어 있던 스마트스토어 판매가
 
 if db is not None:
     st.success(f"✅ 전산 DB 로드 성공! (총 {len(db):,}개 상품 데이터)")
@@ -64,7 +65,6 @@ if db is not None:
     )
 
     if search_input.strip():
-        # 띄어쓰기 기준으로 키워드 분리 (다중 키워드 AND 검색)
         keywords = search_input.strip().split()
 
         condition = pd.Series(True, index=db.index)
@@ -78,7 +78,6 @@ if db is not None:
         filtered_db = db[condition]
 
         if not filtered_db.empty:
-            # 첫 번째 항목에 '선택 안함' 옵션 제공
             options = ["-- 아래 목록에서 상품 선택 --"] + filtered_db[
                 "상품명"
             ].tolist()
@@ -95,8 +94,18 @@ if db is not None:
                 # 매입위안 추출
                 try:
                     yuan_price = float(row.get("매입위안", 0.0))
+                    if math.isnan(yuan_price):
+                        yuan_price = 0.0
                 except Exception:
                     yuan_price = 0.0
+
+                # 전산 등록 스마트스토어 판매가 추출
+                try:
+                    db_selling_price = int(row.get("판매가", 0))
+                    if math.isnan(db_selling_price):
+                        db_selling_price = 0
+                except Exception:
+                    db_selling_price = 0
 
                 # 스마트스토어 링크 추출
                 smartstore_url = str(
@@ -114,17 +123,33 @@ else:
 st.markdown("---")
 
 # ------------------------------------------------------------------
-# 3. 상세 정보 입력 및 수정
+# 3. 상세 정보 입력 및 붉은색 경고 처리
 # ------------------------------------------------------------------
 col1, col2 = st.columns(2)
+
 with col1:
+    # 매입위안 미입력 시 붉은색 박스 표시
+    if yuan_price <= 0:
+        st.markdown(
+            "<div style='background-color:#ffe6e6; padding:8px; border-radius:5px; border:1px solid #ff4d4d; color:#cc0000; font-weight:bold; margin-bottom:8px;'>🚨 [필수] 매입위안을 입력하세요!</div>",
+            unsafe_allow_html=True,
+        )
+
     input_yuan = st.number_input(
         "매입위안 (¥)",
         value=float(yuan_price),
         step=0.1,
-        help="목록 선택 시 자동 채워지며, 필요시 수동 수정 가능합니다.",
+        help="값에 문제가 있거나 0일 경우 직접 입력해주세요.",
     )
+
 with col2:
+    # 스마트스토어 링크 미입력 시 붉은색 박스 표시
+    if not smartstore_url.strip():
+        st.markdown(
+            "<div style='background-color:#fff0e6; padding:8px; border-radius:5px; border:1px solid #ff9933; color:#cc5500; font-weight:bold; margin-bottom:8px;'>⚠️ 스마트스토어 주소가 없습니다! (붙여넣기)</div>",
+            unsafe_allow_html=True,
+        )
+
     input_url = st.text_input(
         "스마트스토어 주소",
         value=smartstore_url,
@@ -181,8 +206,14 @@ if input_yuan > 0:
 
     st.markdown("---")
     st.subheader("2. 마켓별 산출 판매가 목록")
+
+    # 전산 DB에 등록된 스마트스토어 판매가 정보 강조
+    db_price_display = (
+        f"{db_selling_price:,}원" if db_selling_price > 0 else "미등록 (0원)"
+    )
     st.info(
-        f"💡 **원가 정보:** 매입가 ¥{input_yuan:,} ➔ 원가(VAT포함) {int(b2_cost_vat):,}원"
+        f"💡 **원가 정보:** 매입가 ¥{input_yuan:,} ➔ 원가(VAT포함) {int(b2_cost_vat):,}원\n\n"
+        f"🏷️ **전산 등록 스마트스토어 판매가:** `{db_price_display}`"
     )
 
     for market, price in prices.items():
