@@ -13,17 +13,17 @@ st.write(
 )
 
 # ------------------------------------------------------------------
-# 1. 전산 데이터베이스 로드 (파일명 및 열이름 유연하게 대응)
+# 1. 전산 데이터베이스 로드 (실제 폴더 경로 price_calculator 반영)
 # ------------------------------------------------------------------
 
 
-@st.cache_data(ttl=10)  # 캐시 시간을 짧게 세팅하여 즉시 반영
+@st.cache_data(ttl=5)
 def load_master_db():
-    # 시도해볼 파일 경로 목록
+    # 경로 목록 (price_calculator 언더바 적용)
     possible_paths = [
-        "price-calculator/master_db.xlsx",
+        "price_calculator/master_db.xlsx",
+        "price_calculator/전체상품목록_20260725210142_6999190.xlsx",
         "master_db.xlsx",
-        "price-calculator/전체상품목록_20260725210142_6999190.xlsx",
         "전체상품목록_20260725210142_6999190.xlsx",
     ]
 
@@ -35,7 +35,15 @@ def load_master_db():
             except Exception as e:
                 return None, f"파일은 찾았으나 읽기 실패 ({path}): {str(e)}"
 
-    return None, f"파일 없음 (현재 경로 파일 목록: {os.listdir('.')})"
+    # 폴더 내 실제 파일 목록 체크
+    folder_files = []
+    if os.path.exists("price_calculator"):
+        folder_files = os.listdir("price_calculator")
+
+    return (
+        None,
+        f"파일 없음 (price_calculator 폴더 안 파일 목록: {folder_files})",
+    )
 
 
 db, status_msg = load_master_db()
@@ -50,7 +58,7 @@ yuan_price = 0.0
 smartstore_url = ""
 
 if db is not None:
-    st.success(f"✅ 전산 DB 로드 성공! (총 {len(db):,}개 상품)")
+    st.success(f"✅ 전산 DB 로드 성공! (총 {len(db):,}개 상품 데이터)")
 
     search_keyword = st.text_input(
         "🔍 상품명 검색:",
@@ -73,13 +81,13 @@ if db is not None:
 
             product_name = str(row.get("상품명", ""))
 
-            # 매입위안 추출
+            # 매입위안
             try:
                 yuan_price = float(row.get("매입위안", 0.0))
             except Exception:
                 yuan_price = 0.0
 
-            # 스마트스토어 링크 추출 (스마트스토어링크 또는 상품설명2 열 대응)
+            # 스마트스토어 링크
             smartstore_url = str(
                 row.get("스마트스토어링크", row.get("상품설명2", "")) or ""
             )
