@@ -13,13 +13,12 @@ st.write(
 )
 
 # ------------------------------------------------------------------
-# 1. 전산 데이터베이스 로드 (실제 폴더 경로 price_calculator 반영)
+# 1. 전산 데이터베이스 로드
 # ------------------------------------------------------------------
 
 
 @st.cache_data(ttl=5)
 def load_master_db():
-    # 경로 목록 (price_calculator 언더바 적용)
     possible_paths = [
         "price_calculator/master_db.xlsx",
         "price_calculator/전체상품목록_20260725210142_6999190.xlsx",
@@ -35,7 +34,6 @@ def load_master_db():
             except Exception as e:
                 return None, f"파일은 찾았으나 읽기 실패 ({path}): {str(e)}"
 
-    # 폴더 내 실제 파일 목록 체크
     folder_files = []
     if os.path.exists("price_calculator"):
         folder_files = os.listdir("price_calculator")
@@ -62,14 +60,15 @@ if db is not None:
 
     search_keyword = st.text_input(
         "🔍 상품명 검색:",
-        placeholder="전산 상품명의 일부를 입력하세요 (예: 콰자, 뜨개꽃 등)",
+        placeholder="전산 상품명을 복사/붙여넣기하거나 일부를 입력하세요.",
     )
 
     if search_keyword:
+        # regex=False 옵션을 추가하여 [ ] 특수문자 검색 오류 해결
         filtered_db = db[
             db["상품명"]
             .astype(str)
-            .str.contains(search_keyword, case=False, na=False)
+            .str.contains(search_keyword, case=False, na=False, regex=False)
         ]
 
         if not filtered_db.empty:
