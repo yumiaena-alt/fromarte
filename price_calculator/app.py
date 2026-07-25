@@ -20,26 +20,36 @@ st.write(
 @st.cache_data(ttl=600)
 def load_master_db():
     try:
-        df = pd.read_excel("master_db.xlsx")
+        # price-calculator 폴더 내 master_db.xlsx 읽어오기
+        df = pd.read_excel("price-calculator/master_db.xlsx")
         return df
     except Exception:
-        return None
+        try:
+            # 루트 경로에 있을 경우 대비
+            df = pd.read_excel("master_db.xlsx")
+            return df
+        except Exception:
+            return None
 
 
 db = load_master_db()
 
 # ------------------------------------------------------------------
-# 2. 상품 정보 조회 및 입력
+# 2. 상품 정보 검색 및 수동 입력 영역 (항상 노출)
 # ------------------------------------------------------------------
-st.subheader("1. 상품 정보 조회 및 입력")
+st.subheader("1. 상품 검색 및 입력")
 
 product_name = ""
 yuan_price = 0.0
 smartstore_url = ""
 
+# DB 연결 상태 안내
 if db is not None:
+    st.success(f"✅ 전산 DB 연결 완료 (총 {len(db):,}개 상품 데이터)")
+
     search_keyword = st.text_input(
-        "🔍 상품명 검색 (전산 상품명의 일부를 입력하세요):"
+        "🔍 상품명 검색:",
+        placeholder="전산 상품명의 일부를 입력하세요 (예: 오버핏)",
     )
 
     if search_keyword:
@@ -51,36 +61,57 @@ if db is not None:
 
         if not filtered_db.empty:
             selected_product = st.selectbox(
-                "매칭된 상품 선택:", filtered_db["상품명"].tolist()
+                f"매칭된 상품 ({len(filtered_db)}건) 중 선택하세요:",
+                filtered_db["상품명"].tolist(),
             )
             row = filtered_db[filtered_db["상품명"] == selected_product].iloc[0]
 
-            product_name = row.get("상품명", "")
-            yuan_price = float(row.get("매입위안", 0.0) or 0.0)
-            smartstore_url = str(row.get("상품설명2", "") or "")
-        else:
-            st.warning("검색 결과가 없습니다. 아래에 수동으로 입력해 주세요.")
+            product_name = str(row.get("상품명", ""))
+            try:
+                yuan_price = float(row.get("매입위안", 0.0))
+            except ValueError:
+                yuan_price = 0.0
 
+            smartstore_url = str(row.get("상품설명2", "") or "")
+            if smartstore_url == "nan":
+                smartstore_url = ""
+        else:
+            st.warning(
+                "⚠️ 검색 결과가 없습니다. 아래에 수동으로 입력해 주세요."
+            )
+else:
+    st.error(
+        "⚠️ `master_db.xlsx` 전산 엑셀 파일을 찾을 수 없습니다. 깃허브 `price-calculator` 폴더 안에 올렸는지 확인해주세요!"
+    )
+    st.text_input(
+        "🔍 상품명 (전산 DB 연결 필요)",
+        disabled=True,
+        placeholder="master_db.xlsx 파일이 업로드되면 검색창이 활성화됩니다.",
+    )
+
+st.markdown("---")
+
+# 검색 결과가 반영되거나 직접 수정할 수 있는 입력란
 col1, col2 = st.columns(2)
 with col1:
     input_yuan = st.number_input(
         "매입위안 (¥)",
-        value=yuan_price,
+        value=float(yuan_price),
         step=0.1,
-        help="값이 없으면 직접 입력하세요.",
+        help="값에 문제가 있거나 없는 경우 직접 숫자를 입력하세요.",
     )
 with col2:
     input_url = st.text_input(
-        "스마트스토어 주소 (선택)",
+        "스마트스토어 주소 (상품설명2)",
         value=smartstore_url,
         placeholder="https://smartstore.naver.com/...",
     )
 
 # ------------------------------------------------------------------
-# 3. 엑셀 이미지 기반 수식 100% 동일 적용
+# 3. 엑셀 이미지 기반 수식 계산 (100% 반영)
 # ------------------------------------------------------------------
 if input_yuan > 0:
-    # 100원 단위 올림 함수
+
     def roundup_100(val):
         return math.ceil(val / 100) * 100
 
@@ -110,7 +141,7 @@ if input_yuan > 0:
     # [B18~B22] 패션플러스 등 홈쇼핑/패션몰 = B5 * 1.2
     b5_12 = roundup_100(b5_recommend * 1.2)
 
-    # 마켓 순서별 정리 (엑셀 표 순서와 일치)
+    # 마켓 순서 정리
     prices = {
         "추천 소비자가": b4_consumer,
         "추천 판매가 (기준가)": b5_recommend,
