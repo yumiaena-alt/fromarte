@@ -9,7 +9,7 @@ st.set_page_config(
 
 st.title("💰 마켓별 판매가 자동 계산기")
 st.write(
-    "전산 상품명을 검색하거나 매입위안을 입력하면 각 도매 마켓별 판매가가 자동으로 계산됩니다."
+    "전산 상품명을 키워드(띄어쓰기)로 부분 검색하여 선택하거나, 매입위안을 직접 입력해 마켓별 판매가를 산출하세요."
 )
 
 # ------------------------------------------------------------------
@@ -47,64 +47,82 @@ def load_master_db():
 db, status_msg = load_master_db()
 
 # ------------------------------------------------------------------
-# 2. 상품 검색 및 입력
+# 2. 스마트 부분 검색 및 상품 선택
 # ------------------------------------------------------------------
-st.subheader("1. 상품 검색 및 입력")
+st.subheader("1. 상품 검색 및 선택")
 
-product_name = ""
+selected_product_name = ""
 yuan_price = 0.0
 smartstore_url = ""
 
 if db is not None:
     st.success(f"✅ 전산 DB 로드 성공! (총 {len(db):,}개 상품 데이터)")
 
-    search_keyword = st.text_input(
-        "🔍 상품명 검색:",
-        placeholder="전산 상품명을 복사/붙여넣기하거나 일부를 입력하세요.",
+    search_input = st.text_input(
+        "🔍 상품명 키워드 부분 검색:",
+        placeholder="단어를 띄어쓰기로 여러 개 입력할 수 있습니다. (예: 메디치 튤립)",
     )
 
-    if search_keyword:
-        # regex=False 옵션을 추가하여 [ ] 특수문자 검색 오류 해결
-        filtered_db = db[
-            db["상품명"]
-            .astype(str)
-            .str.contains(search_keyword, case=False, na=False, regex=False)
-        ]
+    if search_input.strip():
+        # 띄어쓰기 기준으로 키워드 분리 (다중 키워드 AND 검색)
+        keywords = search_input.strip().split()
+
+        condition = pd.Series(True, index=db.index)
+        for kw in keywords:
+            condition &= (
+                db["상품명"]
+                .astype(str)
+                .str.contains(kw, case=False, na=False, regex=False)
+            )
+
+        filtered_db = db[condition]
 
         if not filtered_db.empty:
-            selected_product = st.selectbox(
-                f"매칭된 상품 ({len(filtered_db)}건) 중 선택:",
-                filtered_db["상품명"].tolist(),
+            # 첫 번째 항목에 '선택 안함' 옵션 제공
+            options = ["-- 아래 목록에서 상품 선택 --"] + filtered_db[
+                "상품명"
+            ].tolist()
+
+            chosen = st.selectbox(
+                f"🎯 검색 결과 ({len(filtered_db)}건) 중 선택하세요:", options
             )
-            row = filtered_db[filtered_db["상품명"] == selected_product].iloc[0]
 
-            product_name = str(row.get("상품명", ""))
+            if chosen != "-- 아래 목록에서 상품 선택 --":
+                row = filtered_db[filtered_db["상품명"] == chosen].iloc[0]
 
-            # 매입위안
-            try:
-                yuan_price = float(row.get("매입위안", 0.0))
-            except Exception:
-                yuan_price = 0.0
+                selected_product_name = str(row.get("상품명", ""))
 
-            # 스마트스토어 링크
-            smartstore_url = str(
-                row.get("스마트스토어링크", row.get("상품설명2", "")) or ""
-            )
-            if smartstore_url == "nan":
-                smartstore_url = ""
+                # 매입위안 추출
+                try:
+                    yuan_price = float(row.get("매입위안", 0.0))
+                except Exception:
+                    yuan_price = 0.0
+
+                # 스마트스토어 링크 추출
+                smartstore_url = str(
+                    row.get("스마트스토어링크", row.get("상품설명2", "")) or ""
+                )
+                if smartstore_url == "nan":
+                    smartstore_url = ""
+
+                st.info(f"📌 선택된 상품명: **{selected_product_name}**")
         else:
-            st.warning("⚠️ 검색 결과가 없습니다.")
+            st.warning("⚠️ 입력하신 키워드와 일치하는 상품이 없습니다.")
 else:
     st.error(f"⚠️ 전산 데이터 연결 안됨: {status_msg}")
 
 st.markdown("---")
 
+# ------------------------------------------------------------------
+# 3. 상세 정보 입력 및 수정
+# ------------------------------------------------------------------
 col1, col2 = st.columns(2)
 with col1:
     input_yuan = st.number_input(
         "매입위안 (¥)",
         value=float(yuan_price),
         step=0.1,
+        help="목록 선택 시 자동 채워지며, 필요시 수동 수정 가능합니다.",
     )
 with col2:
     input_url = st.text_input(
@@ -114,7 +132,7 @@ with col2:
     )
 
 # ------------------------------------------------------------------
-# 3. 판매가 계산 로직
+# 4. 마켓별 판매가 자동 계산 로직
 # ------------------------------------------------------------------
 if input_yuan > 0:
 
