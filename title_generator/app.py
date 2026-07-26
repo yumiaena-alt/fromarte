@@ -83,12 +83,17 @@ def _get_naver_commerce_token():
 
 @st.cache_data(ttl=60)
 def fetch_naver_api_price(smartstore_url):
-    if not smartstore_url or "smartstore.naver.com" not in smartstore_url:
+    if not smartstore_url:
         return None, None
+    if "smartstore.naver.com" not in smartstore_url:
+        return (
+            None,
+            "smartstore.naver.com 형식의 링크가 아닙니다. (단축링크(naver.me 등)는 지원하지 않으니 상품 상세페이지의 전체 주소를 붙여넣어 주세요)",
+        )
 
     match = re.search(r"products/(\d+)", smartstore_url)
     if not match:
-        return None, "스마트스토어 URL에서 상품 번호를 찾지 못했습니다."
+        return None, "URL에서 상품 번호(products/숫자)를 찾지 못했습니다."
 
     product_id = match.group(1)
 
@@ -1155,15 +1160,12 @@ with tab2:
         )
 
     with col2:
-        if not smartstore_url.strip():
-            st.markdown(
-                "<div style='background-color:#fff0e6; padding:8px; border-radius:5px; border:1px solid #ff9933; color:#cc5500; font-weight:bold; margin-bottom:8px;'>⚠️ 스마트스토어 주소가 없습니다! (붙여넣기)</div>",
-                unsafe_allow_html=True,
-            )
-
         if smartstore_url:
             st.session_state["price_url_input"] = smartstore_url
         _sync_shared_url("price_url_input")
+
+        if not st.session_state.get("price_url_input", "").strip():
+            st.warning("⚠️ 스마트스토어 주소가 없습니다! (붙여넣기)")
 
         input_url = st.text_input(
             "스마트스토어 주소",
@@ -1235,7 +1237,10 @@ with tab2:
             final_recommend = orig_recommend
             final_consumer = orig_consumer
 
-            if ss_price > 0 and ss_price < orig_recommend:
+            if ss_price <= 0:
+                price_case_msg = "warning"
+                price_case_text = "⚠️ 등록된 네이버 스마트스토어 판매가가 없어 비교하지 못했습니다. 아래 추천가는 **원가 기준으로만 산출된 값**이니, 실제 스마트스토어 판매가를 확인해 위 입력란에 입력한 뒤 다시 비교해 보세요."
+            elif ss_price < orig_recommend:
                 price_case_msg = "warning"
                 price_case_text = f"🚨 **주의:** 현재 스마트스토어 판매가({ss_price:,}원)가 추천 판매가({orig_recommend:,}원)보다 낮습니다! 마진 확보를 위해 **스마트스토어 판매가를 인상**하는 것을 권장합니다."
             else:
