@@ -965,6 +965,22 @@ with tab3:
         "주문제작/AI 안내 하단 배너를 자동으로 합쳐줍니다."
     )
 
+    @st.cache_data(ttl=300)
+    def get_outbound_ip():
+        try:
+            res = requests.get("https://api.ipify.org", timeout=5)
+            return res.text.strip()
+        except Exception:
+            return None
+
+    _outbound_ip = get_outbound_ip()
+    if _outbound_ip:
+        st.info(
+            f"🔧 현재 서버 외부 IP: `{_outbound_ip}` — 네이버 커머스 API "
+            "애플리케이션의 'API호출 IP' 설정에 이 값을 등록하세요. "
+            "(Streamlit Cloud 서버 IP는 재배포/재시작 시 바뀔 수 있습니다)"
+        )
+
     DETAIL_FOOTER_URL = "https://gi.esmplus.com/fromarte/wholesale/order.png"
 
     @st.cache_data(ttl=3600)
