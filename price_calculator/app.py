@@ -1202,9 +1202,12 @@ with tab2:
 
     col_ss1, col_ss2 = st.columns([2, 1])
     with col_ss1:
+        if st.session_state.get("_last_default_ss_price") != default_ss_price:
+            st.session_state["_last_default_ss_price"] = default_ss_price
+            st.session_state["price_ss_input"] = int(default_ss_price)
+
         input_ss_price = st.number_input(
             "네이버 스마트스토어 실제 판매가 (직접 수정/입력 가능)",
-            value=int(default_ss_price),
             step=100,
             help="주소를 통해 자동 수집된 가격이 있거나 직접 변경할 금액을 입력하세요.",
             key="price_ss_input",
