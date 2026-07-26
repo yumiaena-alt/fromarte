@@ -465,29 +465,8 @@ with tab2:
                 "⚠️ 선택된 키워드가 없습니다. 네이버 키워드를 입력하고 체크해주세요."
             )
         else:
-            with st.spinner("AI가 사용 가능한 모델을 탐색하여 상품명을 생성 중입니다..."):
+            with st.spinner("AI가 상품명을 생성 중입니다..."):
                 genai.configure(api_key=gemini_api_key)
-
-                # 💡 사용 가능한 모델을 동적으로 자동 탐색하는 스마트 로직
-                def get_working_model():
-                    candidates = [
-                        "gemini-1.5-flash-latest",
-                        "gemini-1.5-flash",
-                        "gemini-pro",
-                        "gemini-1.0-pro",
-                    ]
-                    
-                    try:
-                        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                        for c in candidates:
-                            for m in available_models:
-                                if c in m:
-                                    return genai.GenerativeModel(m)
-                    except Exception:
-                        pass
-                    
-                    # 폴백(기본값)
-                    return genai.GenerativeModel("gemini-1.5-flash")
 
                 prompt = f"""
 너는 한국 이커머스(네이버 스마트스토어, 쿠팡 등) SEO 전문가야.
@@ -512,12 +491,30 @@ with tab2:
 7. 가장 아래에는 활용된 키워드 20개를 검색량 높은 순서대로 쉼표(,)로 구분하여 한 줄로 적어줘.
 """
 
-                try:
-                    model = get_working_model()
-                    response = model.generate_content(prompt)
+                # 💡 무료 플랜에서 지원되는 Flash 모델들만 순차 시도 (Pro 모델 배제)
+                flash_models = [
+                    "gemini-1.5-flash",
+                    "gemini-1.5-flash-8b",
+                    "gemini-2.0-flash-exp",
+                    "models/gemini-1.5-flash",
+                ]
 
+                response_text = None
+                last_error = None
+
+                for model_name in flash_models:
+                    try:
+                        model = genai.GenerativeModel(model_name)
+                        res = model.generate_content(prompt)
+                        if res and res.text:
+                            response_text = res.text
+                            break
+                    except Exception as err:
+                        last_error = err
+                        continue
+
+                if response_text:
                     st.success("✅ SEO 상품명 생성 완료!")
-                    st.markdown(response.text)
-
-                except Exception as e:
-                    st.error(f"AI 생성 중 오류가 발생했습니다: {str(e)}")
+                    st.markdown(response_text)
+                else:
+                    st.error(f"AI 생성 중 오류가 발생했습니다: {str(last_error)}")
