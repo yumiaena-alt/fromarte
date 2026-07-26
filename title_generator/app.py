@@ -17,7 +17,7 @@ from PIL import Image
 st.set_page_config(
     page_title="프롬아떼 스마트 커머스 툴",
     page_icon="🛍️",
-    layout="centered",
+    layout="wide",
 )
 
 st.title("🛍️ 프롬아떼 스마트 커머스 툴")
@@ -231,13 +231,27 @@ def render_keyword_selection_table(kw_results, page_size=10):
         disabled=[c for c in df.columns if c != "추가"],
         column_config={
             "추가": st.column_config.CheckboxColumn("추가", width="small"),
-            "PC 검색수": st.column_config.NumberColumn(format="%d"),
-            "모바일 검색수": st.column_config.NumberColumn(format="%d"),
-            "PC 클릭수": st.column_config.NumberColumn(format="%.1f"),
-            "모바일 클릭수": st.column_config.NumberColumn(format="%.1f"),
-            "PC 클릭률(%)": st.column_config.NumberColumn(format="%.2f"),
-            "모바일 클릭률(%)": st.column_config.NumberColumn(format="%.2f"),
-            "노출 광고수": st.column_config.NumberColumn(format="%d"),
+            "연관키워드": st.column_config.TextColumn(width="large"),
+            "PC 검색수": st.column_config.NumberColumn(format="%d", width="small"),
+            "모바일 검색수": st.column_config.NumberColumn(
+                format="%d", width="small"
+            ),
+            "PC 클릭수": st.column_config.NumberColumn(
+                format="%.1f", width="small"
+            ),
+            "모바일 클릭수": st.column_config.NumberColumn(
+                format="%.1f", width="small"
+            ),
+            "PC 클릭률(%)": st.column_config.NumberColumn(
+                format="%.2f", width="small"
+            ),
+            "모바일 클릭률(%)": st.column_config.NumberColumn(
+                format="%.2f", width="small"
+            ),
+            "경쟁정도": st.column_config.TextColumn(width="small"),
+            "노출 광고수": st.column_config.NumberColumn(
+                format="%d", width="small"
+            ),
         },
         key=f"tg_kw_editor_{page}",
     )
@@ -476,7 +490,7 @@ with tab1:
 - 50~70Byte처럼 짧게 끝내지 말고, 남은 키워드나 소재/특징 수식어를 더 붙여서 100Byte에 최대한 채워.
 
 [기타 제약]
-1. 가장 첫머리에는 반드시 브랜드명 [{brand_name}]을 배치할 것.
+1. 가장 첫머리에는 반드시 브랜드명 {brand_name}을(를) 대괄호나 특수문자로 감싸지 말고 텍스트 그대로 배치할 것 (예: [{brand_name}]이 아니라 {brand_name}).
 2. 키워드는 검색량 높은 순서대로 배치할 것.
 3. '최저가', '1+1', '특가', '무료배송' 등 수식어나 금지어는 절대 제외할 것.
 4. 저작권 및 상표권 문제가 없는 안전한 단어만 활용할 것.
