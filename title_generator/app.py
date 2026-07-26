@@ -125,25 +125,22 @@ with tab1:
         "네이버 광고주 센터 데이터를 기반으로 100byte SEO 상품명을 자동 조합합니다."
     )
 
-    col_info1, col_info2 = st.columns(2)
-    with col_info1:
-        brand_name = st.text_input(
-            "브랜드명", value="프롬아떼", key="tg_brand_name"
-        )
-        product_type = st.text_input(
-            "상품 종류/기본명",
-            placeholder="예: 어린이 자전거 바구니",
-            key="tg_product_type",
-        )
-    with col_info2:
-        product_features = st.text_input(
-            "주요 특징/소재",
-            placeholder="예: 플라스틱, 자체디자인, 킥보드겸용",
-            key="tg_product_features",
-        )
-        product_target = st.text_input(
-            "타겟/용도", placeholder="예: 어린이, 유아", key="tg_product_target"
-        )
+    product_type = st.text_input(
+        "상품 종류/기본명",
+        placeholder="예: 어린이 자전거 바구니",
+        key="tg_product_type",
+    )
+    brand_name = st.text_input(
+        "브랜드명", value="프롬아떼", key="tg_brand_name"
+    )
+    product_features = st.text_input(
+        "주요 특징/소재",
+        placeholder="예: 플라스틱, 자체디자인, 킥보드겸용",
+        key="tg_product_features",
+    )
+    product_target = st.text_input(
+        "타겟/용도", placeholder="예: 어린이, 유아", key="tg_product_target"
+    )
 
     st.markdown("#### 📥 네이버 키워드 도구 데이터 입력")
     raw_keywords_text = st.text_area(
