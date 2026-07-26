@@ -20,6 +20,18 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown(
+    """
+    <style>
+    .block-container {
+        max-width: 1100px;
+        margin: 0 auto;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("🛍️ 프롬아떼 스마트 커머스 툴")
 st.write("원하시는 기능을 상단 탭에서 선택하여 사용하세요.")
 
