@@ -84,32 +84,33 @@ def _get_naver_commerce_token():
 @st.cache_data(ttl=60)
 def fetch_naver_api_price(smartstore_url):
     if not smartstore_url or "smartstore.naver.com" not in smartstore_url:
-        return None
+        return None, None
 
     match = re.search(r"products/(\d+)", smartstore_url)
     if not match:
-        return None
+        return None, "스마트스토어 URL에서 상품 번호를 찾지 못했습니다."
 
     product_id = match.group(1)
 
     access_token, err = _get_naver_commerce_token()
     if err:
-        return None
+        return None, f"네이버 API 인증 실패: {err}"
 
     try:
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
-        res = requests.get(api_url, headers=headers, timeout=5)
+        res = requests.get(api_url, headers=headers, timeout=10)
+        res.raise_for_status()
         data = res.json()
+    except Exception as e:
+        return None, f"네이버 상품 조회 실패: {e}"
 
-        origin_product = data.get("originProduct", {})
-        discount_price = origin_product.get("salePrice", 0)
+    origin_product = data.get("originProduct", {}) or {}
+    discount_price = origin_product.get("salePrice", 0)
 
-        if discount_price > 0:
-            return int(discount_price)
-    except Exception:
-        pass
-    return None
+    if discount_price and discount_price > 0:
+        return int(discount_price), None
+    return None, "네이버 API 응답에 판매가 정보가 없습니다."
 
 
 def _parse_text_align(raw_html):
@@ -770,14 +771,16 @@ with tab1:
         st.session_state["_tg_last_product_type"] = product_type
         st.session_state["tg_seed_keyword"] = product_type
 
-    product_features = st.text_input(
-        "주요 특징/소재",
-        placeholder="예: USB 충전, 무소음, 3단계 풍속조절",
-        key="tg_product_features",
-    )
-    product_target = st.text_input(
-        "타겟/용도", placeholder="예: 캠핑, 차량용", key="tg_product_target"
-    )
+    with st.expander("🔧 추가 설명 (선택, 정확도를 높이고 싶을 때 입력)"):
+        product_features = st.text_input(
+            "주요 특징/소재",
+            placeholder="예: USB 충전, 무소음, 3단계 풍속조절",
+            key="tg_product_features",
+        )
+        product_target = st.text_input(
+            "타겟/용도", placeholder="예: 캠핑, 차량용", key="tg_product_target"
+        )
+
     brand_name = st.text_input(
         "브랜드명", value="프롬아떼", key="tg_brand_name"
     )
@@ -1137,15 +1140,16 @@ with tab2:
     col1, col2 = st.columns(2)
 
     with col1:
-        if yuan_price <= 0:
-            st.markdown(
-                "<div style='background-color:#ffe6e6; padding:8px; border-radius:5px; border:1px solid #ff4d4d; color:#cc0000; font-weight:bold; margin-bottom:8px;'>🚨 [필수] 매입위안을 입력하세요!</div>",
-                unsafe_allow_html=True,
-            )
+        if st.session_state.get("_last_db_yuan_price") != yuan_price:
+            st.session_state["_last_db_yuan_price"] = yuan_price
+            st.session_state["price_yuan_input"] = float(yuan_price)
+
+        current_yuan = st.session_state.get("price_yuan_input", float(yuan_price))
+        if current_yuan <= 0:
+            st.warning("🚨 [필수] 매입위안을 입력하세요!")
 
         input_yuan = st.number_input(
             "매입위안 (¥)",
-            value=float(yuan_price),
             step=0.1,
             key="price_yuan_input",
         )
@@ -1172,7 +1176,7 @@ with tab2:
                 "🔗 스마트스토어 상품페이지 직접 열기", input_url.strip()
             )
 
-    api_fetched_price = fetch_naver_api_price(input_url)
+    api_fetched_price, api_price_err = fetch_naver_api_price(input_url)
     default_ss_price = 0
     price_source_badge = ""
 
@@ -1190,6 +1194,9 @@ with tab2:
         price_source_badge = (
             "⚪ 등록된 가격이 없어 0원으로 표시됩니다. (직접 입력 가능)"
         )
+
+    if api_price_err and input_url.strip():
+        st.caption(f"⚠️ 네이버 API 실시간 가격 조회 실패: {api_price_err}")
 
     col_ss1, col_ss2 = st.columns([2, 1])
     with col_ss1:
@@ -1346,6 +1353,7 @@ with tab3:
     detail_input_method = st.radio(
         "상세페이지 가져오는 방식",
         ["📤 이미지 업로드", "🔗 스마트스토어 링크로 가져오기"],
+        index=1,
         horizontal=True,
         key="detail_input_method",
     )
