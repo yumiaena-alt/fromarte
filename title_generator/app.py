@@ -113,8 +113,8 @@ def fetch_naver_api_price(smartstore_url):
 
 
 def _parse_text_align(raw_html):
-    m = re.search(r"text-align:\s*(left|right|center)", raw_html)
-    return m.group(1) if m else "center"
+    # 사용자 요청에 따라 원본 정렬과 상관없이 항상 중앙정렬로 렌더링한다.
+    return "center"
 
 
 def _parse_text_color(raw_html):
@@ -153,7 +153,10 @@ def _parse_detail_content_segments(html):
                 sizes = [
                     int(s) for s in re.findall(r"font-size:\s*(\d+)px", raw_all)
                 ]
-                font_size = max(min(max(sizes), 48), 16) if sizes else 26
+                # 원본 대비 다소 작게 렌더링 (0.8배 축소, 13~34px로 제한)
+                font_size = (
+                    max(min(int(max(sizes) * 0.8), 34), 13) if sizes else 20
+                )
                 align = _parse_text_align(raw_all)
                 color = _parse_text_color(raw_all)
                 if joined.strip():
@@ -283,6 +286,9 @@ def _wrap_text_lines(draw, text, font, max_width):
 
 def render_text_segment(text, width, font_size=26, align="center", color=(51, 51, 51)):
     """텍스트를 상세페이지 폭에 맞춰 이미지로 렌더링 (원래 위치/정렬/색상을 반영)."""
+    # 문장이 이어져서 너무 길어지지 않도록 마침표 뒤는 항상 줄바꿈한다.
+    text = re.sub(r"\.\s*", ".\n", text).strip()
+
     font = _get_korean_font(font_size)
     tmp_draw = ImageDraw.Draw(Image.new("RGB", (10, 10)))
     padding_x = 24
@@ -307,6 +313,19 @@ def render_text_segment(text, width, font_size=26, align="center", color=(51, 51
         draw.text((x, y), line, font=font, fill=color)
         y += line_height
     return img
+
+
+def open_image_flatten_white(data):
+    """PNG 등 투명 배경 이미지를 검은 배경으로 깨지지 않도록 흰 배경에 합성해서 연다."""
+    img = Image.open(data)
+    if img.mode in ("RGBA", "LA") or (
+        img.mode == "P" and "transparency" in img.info
+    ):
+        img = img.convert("RGBA")
+        bg = Image.new("RGB", img.size, (255, 255, 255))
+        bg.paste(img, mask=img.split()[-1])
+        return bg
+    return img.convert("RGB")
 
 
 def combine_image_row(images):
@@ -1161,7 +1180,7 @@ with tab3:
             )
             with urllib.request.urlopen(req) as response:
                 footer_data = response.read()
-            return Image.open(io.BytesIO(footer_data)).convert("RGB")
+            return open_image_flatten_white(io.BytesIO(footer_data))
         except Exception as e:
             st.error(f"하단 배너 이미지를 불러오는 데 실패했습니다: {e}")
             return None
@@ -1183,7 +1202,7 @@ with tab3:
             key="detail_uploader",
         )
         if detail_uploaded_file is not None:
-            main_img = Image.open(detail_uploaded_file).convert("RGB")
+            main_img = open_image_flatten_white(detail_uploaded_file)
             source_name = detail_uploaded_file.name.rsplit(".", 1)[0]
     else:
         detail_target_width = st.number_input(
@@ -1255,9 +1274,9 @@ with tab3:
                                     )
                                     img_res.raise_for_status()
                                     row_images.append(
-                                        Image.open(
+                                        open_image_flatten_white(
                                             io.BytesIO(img_res.content)
-                                        ).convert("RGB")
+                                        )
                                     )
                                 except Exception:
                                     failed_count += 1
@@ -1279,19 +1298,13 @@ with tab3:
 
                     if not built_blocks:
                         st.error("⚠️ 상세페이지 내용을 하나도 가져오지 못했습니다.")
+                        st.session_state["detail_blocks_raw"] = None
                         st.session_state["detail_link_main_img"] = None
                     else:
-                        total_h = sum(b.height for b in built_blocks)
-                        stacked = Image.new(
-                            "RGB", (detail_target_width, total_h), (255, 255, 255)
-                        )
-                        y = 0
-                        for b in built_blocks:
-                            stacked.paste(b, (0, y))
-                            y += b.height
-
-                        st.session_state["detail_link_main_img"] = stacked
-
+                        st.session_state["detail_blocks_raw"] = built_blocks
+                        st.session_state["detail_block_keep"] = {
+                            i: True for i in range(len(built_blocks))
+                        }
                         if failed_count:
                             st.warning(
                                 f"⚠️ 이미지 {failed_count}개는 다운로드에 실패해 "
@@ -1299,8 +1312,40 @@ with tab3:
                             )
                         st.success(
                             f"✅ 텍스트/이미지 {len(built_blocks)}개 블록을 "
-                            f"{detail_target_width}px 폭으로 원래 순서대로 합쳤습니다."
+                            f"{detail_target_width}px 폭으로 가져왔습니다. "
+                            "아래에서 화질이 낮은 블록은 체크 해제해서 빼세요."
                         )
+
+        raw_blocks = st.session_state.get("detail_blocks_raw")
+        if raw_blocks:
+            st.markdown("#### 🖼️ 포함할 블록 선택 (화질 낮은 이미지는 체크 해제)")
+            keep_map = st.session_state.setdefault("detail_block_keep", {})
+            preview_cols = st.columns(4)
+            for idx, block in enumerate(raw_blocks):
+                col = preview_cols[idx % 4]
+                col.image(block, use_container_width=True)
+                keep = col.checkbox(
+                    "포함",
+                    value=keep_map.get(idx, True),
+                    key=f"detail_block_keep_{idx}",
+                )
+                keep_map[idx] = keep
+
+            kept_blocks = [
+                b for i, b in enumerate(raw_blocks) if keep_map.get(i, True)
+            ]
+            if kept_blocks:
+                total_h = sum(b.height for b in kept_blocks)
+                stacked = Image.new(
+                    "RGB", (detail_target_width, total_h), (255, 255, 255)
+                )
+                y = 0
+                for b in kept_blocks:
+                    stacked.paste(b, (0, y))
+                    y += b.height
+                st.session_state["detail_link_main_img"] = stacked
+            else:
+                st.session_state["detail_link_main_img"] = None
 
         stored_img = st.session_state.get("detail_link_main_img")
         if stored_img is not None:
