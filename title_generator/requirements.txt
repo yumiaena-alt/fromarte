@@ -6,4 +6,3 @@ google-generativeai
 Pillow
 bcrypt
 beautifulsoup4
-selenium
