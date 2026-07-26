@@ -211,6 +211,9 @@ def render_keyword_selection_table(kw_results, page_size=10):
         st.session_state["tg_kw_selected"] = {}
     selected_map = st.session_state["tg_kw_selected"]
 
+    if "tg_kw_editor_version" not in st.session_state:
+        st.session_state["tg_kw_editor_version"] = 0
+
     total = len(kw_results)
     total_pages = max(1, math.ceil(total / page_size))
     page = min(max(st.session_state.get("tg_kw_page", 1), 1), total_pages)
@@ -265,7 +268,7 @@ def render_keyword_selection_table(kw_results, page_size=10):
                 format="%d", width="small"
             ),
         },
-        key=f"tg_kw_editor_{page}",
+        key=f"tg_kw_editor_{page}_{st.session_state['tg_kw_editor_version']}",
     )
 
     for _, r in edited.iterrows():
@@ -291,8 +294,16 @@ def render_keyword_selection_table(kw_results, page_size=10):
 
     selected_keywords = [kw for kw, checked in selected_map.items() if checked]
     st.caption(f"✅ 선택된 키워드: {len(selected_keywords)}개")
+
     if selected_keywords:
-        st.caption(", ".join(selected_keywords))
+        chip_cols = st.columns(6)
+        for idx, kw in enumerate(selected_keywords):
+            if chip_cols[idx % 6].button(
+                f"❌ {kw}", key=f"tg_kw_remove_{kw}", use_container_width=True
+            ):
+                selected_map[kw] = False
+                st.session_state["tg_kw_editor_version"] += 1
+                st.rerun()
 
     return selected_keywords
 
