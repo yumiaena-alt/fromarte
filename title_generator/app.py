@@ -8,6 +8,7 @@ import re
 import time
 import urllib.request
 
+import bcrypt
 import google.generativeai as genai
 import pandas as pd
 import requests
@@ -53,10 +54,20 @@ def _get_naver_commerce_token():
         return None, "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET가 등록되지 않았습니다."
 
     try:
+        # 네이버 커머스 API는 client_secret을 bcrypt salt로 사용해
+        # "client_id_timestamp" 문자열을 해시한 서명을 요구한다.
+        timestamp = str(int(time.time() * 1000))
+        password = f"{client_id}_{timestamp}"
+        hashed = bcrypt.hashpw(
+            password.encode("utf-8"), client_secret.encode("utf-8")
+        )
+        client_secret_sign = base64.b64encode(hashed).decode("utf-8")
+
         token_url = "https://api.commerce.naver.com/external/v1/oauth2/token"
         token_data = {
             "client_id": client_id,
-            "client_secret": client_secret,
+            "timestamp": timestamp,
+            "client_secret_sign": client_secret_sign,
             "grant_type": "client_credentials",
             "type": "SELF",
         }
