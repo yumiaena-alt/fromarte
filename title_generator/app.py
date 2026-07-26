@@ -1158,6 +1158,9 @@ with tab3:
         "주문제작/AI 안내 하단 배너를 자동으로 합쳐줍니다."
     )
 
+    top_download_slot = st.container()
+    st.markdown("---")
+
     @st.cache_data(ttl=300)
     def get_outbound_ip():
         try:
@@ -1303,13 +1306,10 @@ with tab3:
 
                     if not built_blocks:
                         st.error("⚠️ 상세페이지 내용을 하나도 가져오지 못했습니다.")
-                        st.session_state["detail_blocks_raw"] = None
+                        st.session_state["detail_active_blocks"] = None
                         st.session_state["detail_link_main_img"] = None
                     else:
-                        st.session_state["detail_blocks_raw"] = built_blocks
-                        st.session_state["detail_block_keep"] = {
-                            i: True for i in range(len(built_blocks))
-                        }
+                        st.session_state["detail_active_blocks"] = built_blocks
                         if failed_count:
                             st.warning(
                                 f"⚠️ 이미지 {failed_count}개는 다운로드에 실패해 "
@@ -1318,40 +1318,79 @@ with tab3:
                         st.success(
                             f"✅ 텍스트/이미지 {len(built_blocks)}개 블록을 "
                             f"{detail_target_width}px 폭으로 가져왔습니다. "
-                            "아래에서 화질이 낮은 블록은 체크 해제해서 빼세요."
+                            "아래에서 순서 변경/가로 합치기/삭제가 가능합니다."
                         )
 
-        raw_blocks = st.session_state.get("detail_blocks_raw")
-        if raw_blocks:
+        active_blocks = st.session_state.get("detail_active_blocks")
+        if active_blocks:
             st.markdown(
-                "#### 🖼️ 미리보기 — 실제 결과물과 같은 순서입니다. "
-                "필요 없는 블록은 바로 아래 삭제 버튼을 누르세요"
+                "#### 🖼️ 미리보기 — 위/아래로 순서를 바꾸거나, 다음 블록과 "
+                "가로로 합치거나(옆에 배치하면 두 이미지가 작아지며 나란히 "
+                "정렬됩니다), 삭제할 수 있습니다"
             )
-            keep_map = st.session_state.setdefault("detail_block_keep", {})
 
-            for idx, block in enumerate(raw_blocks):
-                if not keep_map.get(idx, True):
-                    continue
+            for idx, block in enumerate(active_blocks):
                 with st.container(border=True):
                     st.image(block, use_container_width=True)
-                    if st.button(
-                        "🗑️ 위 블록 삭제",
-                        key=f"detail_block_del_{idx}",
+                    btn_cols = st.columns(4)
+                    if btn_cols[0].button(
+                        "⬆️ 위로",
+                        key=f"detail_up_{idx}",
+                        disabled=(idx == 0),
                         use_container_width=True,
                     ):
-                        keep_map[idx] = False
+                        active_blocks[idx - 1], active_blocks[idx] = (
+                            active_blocks[idx],
+                            active_blocks[idx - 1],
+                        )
+                        st.session_state["detail_active_blocks"] = active_blocks
+                        st.rerun()
+                    if btn_cols[1].button(
+                        "⬇️ 아래로",
+                        key=f"detail_down_{idx}",
+                        disabled=(idx == len(active_blocks) - 1),
+                        use_container_width=True,
+                    ):
+                        active_blocks[idx + 1], active_blocks[idx] = (
+                            active_blocks[idx],
+                            active_blocks[idx + 1],
+                        )
+                        st.session_state["detail_active_blocks"] = active_blocks
+                        st.rerun()
+                    if btn_cols[2].button(
+                        "➡️ 다음과 가로로 합치기",
+                        key=f"detail_merge_{idx}",
+                        disabled=(idx == len(active_blocks) - 1),
+                        use_container_width=True,
+                    ):
+                        merged_row = combine_image_row(
+                            [active_blocks[idx], active_blocks[idx + 1]]
+                        )
+                        row_w, row_h = merged_row.size
+                        new_h = int(row_h * (detail_target_width / row_w))
+                        merged_row = merged_row.resize(
+                            (detail_target_width, new_h),
+                            Image.Resampling.LANCZOS,
+                        )
+                        active_blocks[idx : idx + 2] = [merged_row]
+                        st.session_state["detail_active_blocks"] = active_blocks
+                        st.rerun()
+                    if btn_cols[3].button(
+                        "🗑️ 삭제",
+                        key=f"detail_del_{idx}",
+                        use_container_width=True,
+                    ):
+                        active_blocks.pop(idx)
+                        st.session_state["detail_active_blocks"] = active_blocks
                         st.rerun()
 
-            kept_blocks = [
-                b for i, b in enumerate(raw_blocks) if keep_map.get(i, True)
-            ]
-            if kept_blocks:
-                total_h = sum(b.height for b in kept_blocks)
+            if active_blocks:
+                total_h = sum(b.height for b in active_blocks)
                 stacked = Image.new(
                     "RGB", (detail_target_width, total_h), (255, 255, 255)
                 )
                 y = 0
-                for b in kept_blocks:
+                for b in active_blocks:
                     stacked.paste(b, (0, y))
                     y += b.height
                 st.session_state["detail_link_main_img"] = stacked
@@ -1396,10 +1435,12 @@ with tab3:
 
             output_filename = f"{source_name}_final.jpg"
 
-            st.download_button(
-                label="📥 완성된 상세페이지 다운로드",
-                data=byte_im,
-                file_name=output_filename,
-                mime="image/jpeg",
-                key="detail_download_btn",
-            )
+            with top_download_slot:
+                st.download_button(
+                    label="📥 완성된 상세페이지 다운로드",
+                    data=byte_im,
+                    file_name=output_filename,
+                    mime="image/jpeg",
+                    key="detail_download_btn",
+                    use_container_width=True,
+                )
