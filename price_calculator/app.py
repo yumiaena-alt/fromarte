@@ -19,12 +19,19 @@ st.write(
 # ------------------------------------------------------------------
 
 
+import base64
+import hashlib
+import hmac
+import time
+import requests
+import streamlit as st
+
+
 def fetch_naver_api_price(smartstore_url):
-    """스마트스토어 URL에서 상품ID를 추출하여 네이버 Commerce API로 판매가를 조회합니다."""
+    """스마트스토어 URL에서 상품ID를 추출하여 네이버 Commerce API(서명 인증 방식)로 판매가를 조회합니다."""
     if not smartstore_url or not isinstance(smartstore_url, str):
         return None, "주소가 입력되지 않았습니다."
 
-    # URL에서 상품 ID(숫자) 추출 (다양한 URL 패턴 대응)
     match = re.search(r"products/(\d+)", smartstore_url)
     if not match:
         return (
@@ -48,14 +55,31 @@ def fetch_naver_api_price(smartstore_url):
         )
 
     try:
-        # 1. 토큰 발급
+        # 1. 네이버 커머스 API 서명(Signature) 및 Timestamp 생성
+        timestamp = str(int(time.time() * 1000))
+
+        # client_id와 timestamp를 연동하여 암호화 서명 생성
+        password = f"{client_id}_{timestamp}"
+
+        # bcrypt 모듈 대신 네이버 API 규격(HMAC-SHA256) 생성
+        # 비밀키(client_secret)와 암호화 대상(password)을 조합
+        hashed = hmac.new(
+            client_secret.encode("utf-8"),
+            password.encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        client_secret_sign = base64.b64encode(hashed).decode("utf-8")
+
+        # 2. 토큰 발급 요청
         token_url = "https://api.commerce.naver.com/external/v1/oauth2/token"
         token_data = {
             "client_id": client_id,
-            "client_secret": client_secret,
+            "timestamp": timestamp,
+            "client_secret_sign": client_secret_sign,
             "grant_type": "client_credentials",
             "type": "SELF",
         }
+
         token_res = requests.post(token_url, data=token_data, timeout=5)
 
         if token_res.status_code != 200:
@@ -68,7 +92,7 @@ def fetch_naver_api_price(smartstore_url):
         if not access_token:
             return None, "토큰 발급 응답에 access_token이 없습니다."
 
-        # 2. 상품 상세 정보 조회
+        # 3. 상품 상세 정보 조회
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
         res = requests.get(api_url, headers=headers, timeout=5)
@@ -90,7 +114,6 @@ def fetch_naver_api_price(smartstore_url):
 
     except Exception as e:
         return None, f"API 통신 오류: {str(e)}"
-
 
 # ------------------------------------------------------------------
 # 2. 전산 데이터베이스 로드
