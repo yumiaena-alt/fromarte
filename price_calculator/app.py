@@ -19,7 +19,6 @@ from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -467,26 +466,12 @@ def upload_to_esm_via_selenium(image_bytes, filename, folder="wholesale"):
         if chromium_path:
             options.binary_location = chromium_path
 
-        chromedriver_candidates = [
-            shutil.which("chromedriver"),
-            "/usr/bin/chromedriver",
-            "/usr/lib/chromium/chromedriver",
-            "/usr/lib/chromium-browser/chromedriver",
-        ]
-        chromedriver_path = next(
-            (p for p in chromedriver_candidates if p and os.path.exists(p)), None
-        )
-
-        if not chromedriver_path:
-            return None, (
-                "chromedriver를 서버에서 찾지 못했습니다 (packages.txt의 "
-                "chromium-driver 설치가 안 됐거나 경로가 다를 수 있습니다). "
-                f"확인한 경로: {chromium_candidates + chromedriver_candidates}"
-            ), None
-
-        service = Service(executable_path=chromedriver_path)
-
-        driver = webdriver.Chrome(options=options, service=service)
+        # chromium-driver apt 패키지는 설치된 chromium 버전과 정확히 맞물려야
+        # 해서(버전 고정 의존성) 자주 설치가 실패한다. 대신 Selenium 4.6+의
+        # 자체 드라이버 관리 기능(Selenium Manager)이 설치된 chromium 버전에
+        # 맞는 chromedriver를 알아서 내려받도록 executable_path를 지정하지
+        # 않는다. (필요한 공유 라이브러리는 packages.txt에서 별도 설치)
+        driver = webdriver.Chrome(options=options)
         wait = WebDriverWait(driver, 20)
 
         driver.get("https://im.esmplus.com/")
@@ -1469,6 +1454,7 @@ with tab3:
     )
 
     top_download_slot = st.container()
+    top_esm_slot = st.container()
     st.markdown("---")
 
     @st.cache_data(ttl=300)
@@ -1778,48 +1764,52 @@ with tab3:
                     use_container_width=True,
                 )
 
-            st.markdown("---")
-            st.markdown("#### ☁️ ESM+ 이미지호스팅 자동 업로드")
-            st.caption(
-                "ESM+는 FTP/API를 공식 지원하지 않아, 실제 웹 화면을 자동으로 "
-                "조작해 업로드합니다 (Selenium). 로그인 계정 정보가 필요하며, "
-                "사이트 화면이 바뀌면 실패할 수 있습니다 — 실패 시 화면 캡처를 "
-                "보여드리니 함께 원인을 확인하면 됩니다."
-            )
-
-            default_esm_name = re.sub(r"[^A-Za-z0-9_-]", "", source_name) or "detail"
-            esm_col1, esm_col2 = st.columns(2)
-            with esm_col1:
-                esm_filename_base = st.text_input(
-                    "업로드 파일명 (영문/숫자, 확장자 제외)",
-                    value=default_esm_name,
-                    key="esm_filename_base",
-                )
-            with esm_col2:
-                esm_folder = st.text_input(
-                    "업로드 폴더", value="wholesale", key="esm_folder"
+            with top_esm_slot:
+                st.markdown("#### ☁️ ESM+ 이미지호스팅 자동 업로드")
+                st.caption(
+                    "ESM+는 FTP/API를 공식 지원하지 않아, 실제 웹 화면을 자동으로 "
+                    "조작해 업로드합니다 (Selenium). 로그인 계정 정보가 필요하며, "
+                    "사이트 화면이 바뀌면 실패할 수 있습니다 — 실패 시 화면 캡처를 "
+                    "보여드리니 함께 원인을 확인하면 됩니다."
                 )
 
-            if st.button("☁️ ESM+에 자동 업로드", key="esm_upload_btn"):
-                if not esm_filename_base.strip():
-                    st.warning("⚠️ 업로드 파일명을 입력해주세요.")
-                else:
-                    esm_filename = f"{esm_filename_base.strip()}.jpg"
-                    with st.spinner(
-                        "ESM+에 로그인하고 업로드하는 중입니다 (10~30초 소요)..."
-                    ):
-                        esm_url, esm_err, esm_shot = upload_to_esm_via_selenium(
-                            byte_im, esm_filename, esm_folder.strip() or "wholesale"
-                        )
+                default_esm_name = (
+                    re.sub(r"[^A-Za-z0-9_-]", "", source_name) or "detail"
+                )
+                esm_col1, esm_col2 = st.columns(2)
+                with esm_col1:
+                    esm_filename_base = st.text_input(
+                        "업로드 파일명 (영문/숫자, 확장자 제외)",
+                        value=default_esm_name,
+                        key="esm_filename_base",
+                    )
+                with esm_col2:
+                    esm_folder = st.text_input(
+                        "업로드 폴더", value="wholesale", key="esm_folder"
+                    )
 
-                    if esm_err:
-                        st.error(f"⚠️ ESM+ 업로드 실패: {esm_err}")
-                        if esm_shot:
-                            st.image(
-                                esm_shot,
-                                caption="실패 시점 화면 캡처 (디버깅용)",
-                            )
+                if st.button("☁️ ESM+에 자동 업로드", key="esm_upload_btn"):
+                    if not esm_filename_base.strip():
+                        st.warning("⚠️ 업로드 파일명을 입력해주세요.")
                     else:
-                        st.success("✅ ESM+ 업로드 완료!")
-                        st.code(f'<img src="{esm_url}">', language=None)
-                        st.code(esm_url, language=None)
+                        esm_filename = f"{esm_filename_base.strip()}.jpg"
+                        with st.spinner(
+                            "ESM+에 로그인하고 업로드하는 중입니다 (10~30초 소요)..."
+                        ):
+                            esm_url, esm_err, esm_shot = upload_to_esm_via_selenium(
+                                byte_im,
+                                esm_filename,
+                                esm_folder.strip() or "wholesale",
+                            )
+
+                        if esm_err:
+                            st.error(f"⚠️ ESM+ 업로드 실패: {esm_err}")
+                            if esm_shot:
+                                st.image(
+                                    esm_shot,
+                                    caption="실패 시점 화면 캡처 (디버깅용)",
+                                )
+                        else:
+                            st.success("✅ ESM+ 업로드 완료!")
+                            st.code(f'<img src="{esm_url}">', language=None)
+                            st.code(esm_url, language=None)
