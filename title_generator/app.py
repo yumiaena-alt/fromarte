@@ -1,7 +1,11 @@
+import base64
+import hashlib
+import hmac
 import io
 import math
 import os
 import re
+import time
 import urllib.request
 
 import google.generativeai as genai
@@ -74,6 +78,82 @@ def fetch_naver_api_price(smartstore_url):
     return None
 
 
+def _naver_ad_signature(secret_key, timestamp, method, uri):
+    message = f"{timestamp}.{method}.{uri}"
+    digest = hmac.new(
+        secret_key.encode("utf-8"), message.encode("utf-8"), hashlib.sha256
+    ).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+def _to_search_count(value):
+    """'< 10' 같은 네이버 응답 형식도 처리해서 정수로 변환."""
+    if isinstance(value, (int, float)):
+        return int(value)
+    digits = re.sub(r"[^0-9]", "", str(value))
+    return int(digits) if digits else 0
+
+
+@st.cache_data(ttl=600)
+def fetch_naver_related_keywords(seed_keyword):
+    """네이버 검색광고 Open API로 연관키워드 + 월간검색수를 조회."""
+    api_key = st.secrets.get("NAVER_AD_API_KEY") or os.environ.get(
+        "NAVER_AD_API_KEY"
+    )
+    secret_key = st.secrets.get("NAVER_AD_SECRET_KEY") or os.environ.get(
+        "NAVER_AD_SECRET_KEY"
+    )
+    customer_id = (
+        st.secrets.get("NAVER_AD_CUSTOMER_ID")
+        or os.environ.get("NAVER_AD_CUSTOMER_ID")
+        or "2560350"
+    )
+
+    if not api_key or not secret_key:
+        return None, (
+            "NAVER_AD_API_KEY / NAVER_AD_SECRET_KEY가 등록되지 않았습니다. "
+            "Streamlit Secrets 설정을 확인해주세요."
+        )
+
+    uri = "/keywordstool"
+    method = "GET"
+    timestamp = str(int(time.time() * 1000))
+    signature = _naver_ad_signature(secret_key, timestamp, method, uri)
+
+    headers = {
+        "X-Timestamp": timestamp,
+        "X-API-KEY": api_key,
+        "X-Customer": str(customer_id),
+        "X-Signature": signature,
+    }
+    params = {"hintKeywords": seed_keyword, "showDetail": "1"}
+
+    try:
+        res = requests.get(
+            "https://api.naver.com" + uri,
+            headers=headers,
+            params=params,
+            timeout=10,
+        )
+        res.raise_for_status()
+        data = res.json()
+    except Exception as e:
+        return None, f"네이버 키워드 API 호출 실패: {e}"
+
+    results = []
+    for item in data.get("keywordList", []):
+        kw = str(item.get("relKeyword", "")).strip()
+        if not kw:
+            continue
+        mobile_cnt = _to_search_count(item.get("monthlyMobileQcCnt", 0))
+        pc_cnt = _to_search_count(item.get("monthlyPcQcCnt", 0))
+        results.append((kw, mobile_cnt, pc_cnt))
+
+    # 모바일 노출 많은 순 정렬 (사용자가 기존에 수기로 하던 정렬 기준과 동일)
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results, None
+
+
 @st.cache_data(ttl=5)
 def load_master_db():
     possible_paths = [
@@ -142,31 +222,74 @@ with tab1:
         "타겟/용도", placeholder="예: 어린이, 유아", key="tg_product_target"
     )
 
-    st.markdown("#### 📥 네이버 키워드 도구 데이터 입력")
-    raw_keywords_text = st.text_area(
-        "네이버 광고주 센터에서 추출한 키워드 및 검색량 목록을 붙여넣으세요:",
-        placeholder="예시 (키워드 / 월간검색량 순으로 붙여넣기):\n자전거바구니 15000\n어린이자전거바구니 8200\n킥보드바구니 3100\n유아바구니 1200",
-        height=120,
-        key="tg_raw_keywords",
+    st.markdown("#### 📥 연관 키워드 가져오기")
+    kw_input_method = st.radio(
+        "키워드 입력 방식",
+        ["🔍 네이버 API로 자동 조회 (추천)", "✍️ 직접 붙여넣기"],
+        horizontal=True,
+        key="tg_kw_input_method",
     )
+
+    parsed_keywords = []
+
+    if kw_input_method == "🔍 네이버 API로 자동 조회 (추천)":
+        seed_col1, seed_col2 = st.columns([3, 1])
+        with seed_col1:
+            seed_keyword = st.text_input(
+                "핵심 키워드를 입력하고 조회 버튼을 누르세요",
+                placeholder="예: 자전거바구니",
+                key="tg_seed_keyword",
+            )
+        with seed_col2:
+            st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+            search_clicked = st.button(
+                "🔍 조회", key="tg_kw_search_btn", use_container_width=True
+            )
+
+        if search_clicked:
+            if not seed_keyword.strip():
+                st.warning("⚠️ 조회할 키워드를 입력해주세요.")
+            else:
+                with st.spinner("네이버에서 연관 키워드를 조회 중입니다..."):
+                    results, err = fetch_naver_related_keywords(seed_keyword.strip())
+                if err:
+                    st.error(f"⚠️ {err}")
+                    st.session_state["tg_kw_results"] = None
+                else:
+                    st.session_state["tg_kw_results"] = results
+                    st.session_state["tg_kw_seed"] = seed_keyword.strip()
+
+        kw_results = st.session_state.get("tg_kw_results")
+        if kw_results:
+            st.caption(
+                f"'{st.session_state.get('tg_kw_seed', '')}' 연관 키워드 "
+                f"{len(kw_results)}개 (모바일 검색량 많은 순 정렬)"
+            )
+            parsed_keywords = [(kw, mobile_cnt) for kw, mobile_cnt, pc_cnt in kw_results]
+    else:
+        raw_keywords_text = st.text_area(
+            "네이버 광고주 센터에서 추출한 키워드 및 검색량 목록을 붙여넣으세요:",
+            placeholder="예시 (키워드 / 월간검색량 순으로 붙여넣기):\n자전거바구니 15000\n어린이자전거바구니 8200\n킥보드바구니 3100\n유아바구니 1200",
+            height=120,
+            key="tg_raw_keywords",
+        )
+
+        if raw_keywords_text.strip():
+            lines = raw_keywords_text.strip().split("\n")
+            for line in lines:
+                parts = re.split(r"[\t,,\s]+", line.strip())
+                if parts and parts[0]:
+                    kw = parts[0]
+                    count = (
+                        int(parts[1])
+                        if len(parts) > 1 and parts[1].isdigit()
+                        else 0
+                    )
+                    parsed_keywords.append((kw, count))
 
     valid_keywords = []
 
-    if raw_keywords_text.strip():
-        lines = raw_keywords_text.strip().split("\n")
-        parsed_keywords = []
-
-        for line in lines:
-            parts = re.split(r"[\t,,\s]+", line.strip())
-            if parts and parts[0]:
-                kw = parts[0]
-                count = (
-                    int(parts[1])
-                    if len(parts) > 1 and parts[1].isdigit()
-                    else 0
-                )
-                parsed_keywords.append((kw, count))
-
+    if parsed_keywords:
         parsed_keywords.sort(key=lambda x: x[1], reverse=True)
 
         st.markdown("#### 🖐️ [휴먼 터치] 연관 없는 키워드 체크 해제")
