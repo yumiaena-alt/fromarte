@@ -1752,11 +1752,37 @@ with tab3:
             combined_img.save(buf, format="JPEG", quality=95)
             byte_im = buf.getvalue()
 
-            output_filename = f"{source_name}_final.jpg"
+            esm_customer_id = (
+                st.secrets.get("ESM_CUSTOMER_ID")
+                or os.environ.get("ESM_CUSTOMER_ID")
+                or "fromarte"
+            )
+            default_esm_name = (
+                re.sub(r"[^A-Za-z0-9_-]", "", source_name) or "detail"
+            )
 
             with top_download_slot:
+                st.markdown("#### 📥 다운로드 & ESM+ 업로드 준비")
+                name_col1, name_col2 = st.columns(2)
+                with name_col1:
+                    esm_filename_base = st.text_input(
+                        "파일명 (영문/숫자, 확장자 제외)",
+                        value=default_esm_name,
+                        key="esm_filename_base",
+                    )
+                with name_col2:
+                    esm_folder = st.text_input(
+                        "업로드 폴더", value="wholesale", key="esm_folder"
+                    )
+
+                output_filename = f"{(esm_filename_base.strip() or 'detail')}.jpg"
+                predicted_url = (
+                    f"https://gi.esmplus.com/{esm_customer_id}/"
+                    f"{esm_folder.strip() or 'wholesale'}/{output_filename}"
+                )
+
                 st.download_button(
-                    label="📥 완성된 상세페이지 다운로드",
+                    label="📥 완성된 상세페이지 다운로드 (영문 파일명)",
                     data=byte_im,
                     file_name=output_filename,
                     mime="image/jpeg",
@@ -1764,52 +1790,47 @@ with tab3:
                     use_container_width=True,
                 )
 
-            with top_esm_slot:
-                st.markdown("#### ☁️ ESM+ 이미지호스팅 자동 업로드")
-                st.caption(
-                    "ESM+는 FTP/API를 공식 지원하지 않아, 실제 웹 화면을 자동으로 "
-                    "조작해 업로드합니다 (Selenium). 로그인 계정 정보가 필요하며, "
-                    "사이트 화면이 바뀌면 실패할 수 있습니다 — 실패 시 화면 캡처를 "
-                    "보여드리니 함께 원인을 확인하면 됩니다."
+                st.link_button(
+                    "🔗 ESM+ 이미지호스팅 바로가기 (수동 업로드용)",
+                    "https://im.esmplus.com/",
+                    use_container_width=True,
                 )
 
-                default_esm_name = (
-                    re.sub(r"[^A-Za-z0-9_-]", "", source_name) or "detail"
+                st.caption(
+                    "위와 같은 파일명/폴더로 ESM+에 직접 업로드하면 아래 주소로 "
+                    "접근 가능합니다. (업로드 전 미리보기 — 실제 업로드는 "
+                    "직접 하셔야 합니다)"
                 )
-                esm_col1, esm_col2 = st.columns(2)
-                with esm_col1:
-                    esm_filename_base = st.text_input(
-                        "업로드 파일명 (영문/숫자, 확장자 제외)",
-                        value=default_esm_name,
-                        key="esm_filename_base",
-                    )
-                with esm_col2:
-                    esm_folder = st.text_input(
-                        "업로드 폴더", value="wholesale", key="esm_folder"
-                    )
+                st.code(predicted_url, language=None)
+                st.code(f'<img src="{predicted_url}">', language=None)
+
+            with top_esm_slot:
+                st.markdown("#### ☁️ ESM+ 자동 업로드 (실험적, Selenium)")
+                st.caption(
+                    "위에서 입력한 파일명/폴더로 자동 업로드를 시도합니다. "
+                    "ESM+는 FTP/API를 공식 지원하지 않아 실제 웹 화면을 자동으로 "
+                    "조작하며, 화면이 바뀌면 실패할 수 있습니다 — 실패 시 화면 "
+                    "캡처를 보여드리니 함께 원인을 확인하면 됩니다."
+                )
 
                 if st.button("☁️ ESM+에 자동 업로드", key="esm_upload_btn"):
-                    if not esm_filename_base.strip():
-                        st.warning("⚠️ 업로드 파일명을 입력해주세요.")
-                    else:
-                        esm_filename = f"{esm_filename_base.strip()}.jpg"
-                        with st.spinner(
-                            "ESM+에 로그인하고 업로드하는 중입니다 (10~30초 소요)..."
-                        ):
-                            esm_url, esm_err, esm_shot = upload_to_esm_via_selenium(
-                                byte_im,
-                                esm_filename,
-                                esm_folder.strip() or "wholesale",
-                            )
+                    with st.spinner(
+                        "ESM+에 로그인하고 업로드하는 중입니다 (10~30초 소요)..."
+                    ):
+                        esm_url, esm_err, esm_shot = upload_to_esm_via_selenium(
+                            byte_im,
+                            output_filename,
+                            esm_folder.strip() or "wholesale",
+                        )
 
-                        if esm_err:
-                            st.error(f"⚠️ ESM+ 업로드 실패: {esm_err}")
-                            if esm_shot:
-                                st.image(
-                                    esm_shot,
-                                    caption="실패 시점 화면 캡처 (디버깅용)",
-                                )
-                        else:
-                            st.success("✅ ESM+ 업로드 완료!")
-                            st.code(f'<img src="{esm_url}">', language=None)
-                            st.code(esm_url, language=None)
+                    if esm_err:
+                        st.error(f"⚠️ ESM+ 업로드 실패: {esm_err}")
+                        if esm_shot:
+                            st.image(
+                                esm_shot,
+                                caption="실패 시점 화면 캡처 (디버깅용)",
+                            )
+                    else:
+                        st.success("✅ ESM+ 업로드 완료!")
+                        st.code(f'<img src="{esm_url}">', language=None)
+                        st.code(esm_url, language=None)
