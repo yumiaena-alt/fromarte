@@ -13,7 +13,8 @@ import google.generativeai as genai
 import pandas as pd
 import requests
 import streamlit as st
-from PIL import Image
+from bs4 import BeautifulSoup
+from PIL import Image, ImageDraw, ImageFont
 
 st.set_page_config(
     page_title="프롬아떼 스마트 커머스 툴",
@@ -111,21 +112,70 @@ def fetch_naver_api_price(smartstore_url):
     return None
 
 
-def _extract_image_urls_from_html(html):
-    urls = re.findall(
-        r'<img[^>]+src=["\']([^"\']+)["\']', html or "", re.IGNORECASE
-    )
-    cleaned = []
-    for u in urls:
-        if u.startswith("//"):
-            u = "https:" + u
-        if u.startswith("http"):
-            cleaned.append(u)
-    return cleaned
+def _parse_detail_content_segments(html):
+    """detailContent HTML을 순서대로 순회하여 텍스트/이미지행 세그먼트로 변환.
+    각 세그먼트는 ("text", 문자열, 폰트크기) 또는 ("images", [url, ...]) 형태이며,
+    같은 블록 안에 나란히 있던 이미지들은 하나의 "행"으로 묶어 반환한다
+    (개별 확대로 인한 화질 저하를 막기 위해 나중에 행 단위로 리사이즈한다)."""
+    soup = BeautifulSoup(html or "", "html.parser")
+    segments = []
+
+    def handle_block(node):
+        pending_text = []
+        pending_imgs = []
+
+        def flush_text():
+            nonlocal pending_text
+            if pending_text:
+                joined = "\n".join(t for t, _ in pending_text if t.strip())
+                raw_all = " ".join(h for _, h in pending_text)
+                sizes = [
+                    int(s) for s in re.findall(r"font-size:\s*(\d+)px", raw_all)
+                ]
+                font_size = max(min(max(sizes), 48), 16) if sizes else 26
+                if joined.strip():
+                    segments.append(("text", joined.strip(), font_size))
+            pending_text = []
+
+        def flush_imgs():
+            nonlocal pending_imgs
+            if pending_imgs:
+                segments.append(("images", pending_imgs))
+            pending_imgs = []
+
+        for child in node.children:
+            name = getattr(child, "name", None)
+            if name == "img":
+                flush_text()
+                src = child.get("src", "")
+                if src:
+                    pending_imgs.append(src)
+                continue
+            if name is not None:
+                if child.find("img"):
+                    flush_text()
+                    flush_imgs()
+                    handle_block(child)
+                else:
+                    text = child.get_text(separator=" ", strip=True)
+                    if text:
+                        flush_imgs()
+                        pending_text.append((text, str(child)))
+            else:
+                text = str(child).strip()
+                if text:
+                    flush_imgs()
+                    pending_text.append((text, text))
+
+        flush_text()
+        flush_imgs()
+
+    handle_block(soup)
+    return segments
 
 
-def fetch_naver_product_detail_images(smartstore_url):
-    """네이버 커머스 API로 상품 상세페이지에 삽입된 이미지 URL 목록을 가져온다."""
+def fetch_naver_product_detail_segments(smartstore_url):
+    """네이버 커머스 API로 상품 상세페이지의 텍스트/이미지 순서를 그대로 가져온다."""
     if not smartstore_url or "smartstore.naver.com" not in smartstore_url:
         return None, "스마트스토어 상품 URL이 아닙니다."
 
@@ -152,14 +202,100 @@ def fetch_naver_product_detail_images(smartstore_url):
         origin_product.get("detailContent") or data.get("detailContent") or ""
     )
 
-    image_urls = _extract_image_urls_from_html(detail_content)
-    if not image_urls:
+    segments = _parse_detail_content_segments(detail_content)
+    if not segments:
         return None, (
-            "상세페이지 이미지를 응답에서 찾지 못했습니다 "
+            "상세페이지 내용을 응답에서 찾지 못했습니다 "
             "(detailContent가 비어있거나 형식이 다를 수 있습니다)."
         )
 
-    return image_urls, None
+    return segments, None
+
+
+_KOREAN_FONT_CANDIDATES = [
+    "fonts/NanumGothic.ttf",
+    "title_generator/fonts/NanumGothic.ttf",
+    "price_calculator/fonts/NanumGothic.ttf",
+]
+
+
+def _get_korean_font(size):
+    for path in _KOREAN_FONT_CANDIDATES:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+def _wrap_text_lines(draw, text, font, max_width):
+    lines = []
+    for paragraph in text.split("\n"):
+        if not paragraph.strip():
+            lines.append("")
+            continue
+        words = paragraph.split(" ")
+        current = ""
+        for word in words:
+            candidate = (current + " " + word).strip()
+            if not current or draw.textlength(candidate, font=font) <= max_width:
+                current = candidate
+            else:
+                lines.append(current)
+                current = word
+            while draw.textlength(current, font=font) > max_width and len(current) > 1:
+                lo, hi = 1, len(current)
+                while lo < hi:
+                    mid = (lo + hi + 1) // 2
+                    if draw.textlength(current[:mid], font=font) <= max_width:
+                        lo = mid
+                    else:
+                        hi = mid - 1
+                lines.append(current[:lo])
+                current = current[lo:]
+        if current:
+            lines.append(current)
+    return lines
+
+
+def render_text_segment(text, width, font_size=26):
+    """텍스트를 상세페이지 폭에 맞춰 이미지로 렌더링 (원래 위치에 끼워 넣기 위함)."""
+    font = _get_korean_font(font_size)
+    tmp_draw = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    padding_x = 24
+    lines = _wrap_text_lines(tmp_draw, text, font, width - padding_x * 2)
+
+    ascent, descent = font.getmetrics()
+    line_height = ascent + descent + 12
+    total_height = max(line_height * max(len(lines), 1) + 24, 40)
+
+    img = Image.new("RGB", (width, total_height), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    y = 12
+    for line in lines:
+        draw.text((padding_x, y), line, font=font, fill=(51, 51, 51))
+        y += line_height
+    return img
+
+
+def combine_image_row(images):
+    """가로로 나란히 있던 이미지들을 개별 확대 없이 원본 비율 그대로 한 장으로 합친다."""
+    if len(images) == 1:
+        return images[0]
+
+    max_h = max(img.height for img in images)
+    resized = []
+    for img in images:
+        if img.height != max_h:
+            new_w = max(1, int(img.width * (max_h / img.height)))
+            img = img.resize((new_w, max_h), Image.Resampling.LANCZOS)
+        resized.append(img)
+
+    total_w = sum(img.width for img in resized)
+    row_img = Image.new("RGB", (total_w, max_h), (255, 255, 255))
+    x = 0
+    for img in resized:
+        row_img.paste(img, (x, 0))
+        x += img.width
+    return row_img
 
 
 def _naver_ad_signature(secret_key, timestamp, method, uri):
@@ -1038,8 +1174,8 @@ with tab3:
             if not smartstore_link.strip():
                 st.warning("⚠️ 스마트스토어 상품 URL을 입력해주세요.")
             else:
-                with st.spinner("상세페이지 이미지를 조회하는 중입니다..."):
-                    image_urls, err = fetch_naver_product_detail_images(
+                with st.spinner("상세페이지 내용을 조회하는 중입니다..."):
+                    segments, err = fetch_naver_product_detail_segments(
                         smartstore_link.strip()
                     )
 
@@ -1047,52 +1183,75 @@ with tab3:
                     st.error(f"⚠️ {err}")
                     st.session_state["detail_link_main_img"] = None
                 else:
-                    fetched_images = []
+                    built_blocks = []
                     failed_count = 0
-                    with st.spinner(
-                        f"이미지 {len(image_urls)}개를 고화질로 다운로드하는 중입니다..."
-                    ):
-                        for img_url in image_urls:
-                            try:
-                                img_res = requests.get(
-                                    img_url,
-                                    headers={
-                                        "User-Agent": "Mozilla/5.0",
-                                        "Referer": "https://smartstore.naver.com/",
-                                    },
-                                    timeout=15,
-                                )
-                                img_res.raise_for_status()
-                                img = Image.open(
-                                    io.BytesIO(img_res.content)
-                                ).convert("RGB")
-                                fetched_images.append(img)
-                            except Exception:
-                                failed_count += 1
+                    text_count = sum(1 for s in segments if s[0] == "text")
+                    img_count = sum(
+                        len(s[1]) for s in segments if s[0] == "images"
+                    )
 
-                    if not fetched_images:
-                        st.error("⚠️ 이미지를 하나도 다운로드하지 못했습니다.")
+                    with st.spinner(
+                        f"텍스트 {text_count}개 / 이미지 {img_count}개를 "
+                        "원래 순서대로 조합하는 중입니다..."
+                    ):
+                        for seg in segments:
+                            if seg[0] == "text":
+                                _, text, font_size = seg
+                                built_blocks.append(
+                                    render_text_segment(
+                                        text, detail_target_width, font_size
+                                    )
+                                )
+                                continue
+
+                            _, urls = seg
+                            row_images = []
+                            for img_url in urls:
+                                try:
+                                    img_res = requests.get(
+                                        img_url,
+                                        headers={
+                                            "User-Agent": "Mozilla/5.0",
+                                            "Referer": "https://smartstore.naver.com/",
+                                        },
+                                        timeout=15,
+                                    )
+                                    img_res.raise_for_status()
+                                    row_images.append(
+                                        Image.open(
+                                            io.BytesIO(img_res.content)
+                                        ).convert("RGB")
+                                    )
+                                except Exception:
+                                    failed_count += 1
+
+                            if not row_images:
+                                continue
+
+                            # 가로로 나란히 있던 이미지들을 먼저 원본 비율 그대로
+                            # 한 장으로 합친 뒤, 그 행 전체를 하나의 단위로만
+                            # 리사이즈한다 (이미지 각각을 늘리면 화질이 깨짐).
+                            row_img = combine_image_row(row_images)
+                            row_w, row_h = row_img.size
+                            new_h = int(row_h * (detail_target_width / row_w))
+                            row_img = row_img.resize(
+                                (detail_target_width, new_h),
+                                Image.Resampling.LANCZOS,
+                            )
+                            built_blocks.append(row_img)
+
+                    if not built_blocks:
+                        st.error("⚠️ 상세페이지 내용을 하나도 가져오지 못했습니다.")
                         st.session_state["detail_link_main_img"] = None
                     else:
-                        resized_images = []
-                        for img in fetched_images:
-                            w, h = img.size
-                            new_h = int(h * (detail_target_width / w))
-                            resized_images.append(
-                                img.resize(
-                                    (detail_target_width, new_h),
-                                    Image.Resampling.LANCZOS,
-                                )
-                            )
-
-                        total_h = sum(img.height for img in resized_images)
+                        total_h = sum(b.height for b in built_blocks)
                         stacked = Image.new(
-                            "RGB", (detail_target_width, total_h)
+                            "RGB", (detail_target_width, total_h), (255, 255, 255)
                         )
                         y = 0
-                        for img in resized_images:
-                            stacked.paste(img, (0, y))
-                            y += img.height
+                        for b in built_blocks:
+                            stacked.paste(b, (0, y))
+                            y += b.height
 
                         st.session_state["detail_link_main_img"] = stacked
 
@@ -1102,8 +1261,8 @@ with tab3:
                                 "제외했습니다."
                             )
                         st.success(
-                            f"✅ 이미지 {len(fetched_images)}개를 "
-                            f"{detail_target_width}px 폭으로 합쳤습니다."
+                            f"✅ 텍스트/이미지 {len(built_blocks)}개 블록을 "
+                            f"{detail_target_width}px 폭으로 원래 순서대로 합쳤습니다."
                         )
 
         stored_img = st.session_state.get("detail_link_main_img")
