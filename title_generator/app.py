@@ -248,6 +248,55 @@ def fetch_naver_product_detail_segments(smartstore_url):
     return segments, None
 
 
+def fetch_naver_product_name(smartstore_url):
+    """네이버 커머스 API로 상품의 등록된 이름(상품명)을 가져온다."""
+    if not smartstore_url or "smartstore.naver.com" not in smartstore_url:
+        return None, "스마트스토어 상품 URL이 아닙니다."
+
+    match = re.search(r"products/(\d+)", smartstore_url)
+    if not match:
+        return None, "URL에서 상품 번호를 찾지 못했습니다."
+    product_id = match.group(1)
+
+    access_token, err = _get_naver_commerce_token()
+    if err:
+        return None, err
+
+    try:
+        api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        res = requests.get(api_url, headers=headers, timeout=15)
+        res.raise_for_status()
+        data = res.json()
+    except Exception as e:
+        return None, f"상품 정보 조회 실패: {e}"
+
+    origin_product = data.get("originProduct", {}) or {}
+    name = origin_product.get("name") or origin_product.get("productName")
+    if not name:
+        return None, "상품명을 응답에서 찾지 못했습니다 (필드명이 다를 수 있습니다)."
+
+    return name, None
+
+
+def _sync_shared_url(key):
+    """탭 간 스마트스토어 링크 입력창을 공유 상태와 동기화한다.
+    (이 위젯을 만들기 '전에' 호출해야 한다.)"""
+    if "shared_smartstore_url" not in st.session_state:
+        st.session_state["shared_smartstore_url"] = ""
+    shared = st.session_state["shared_smartstore_url"]
+
+    prev_key = f"_prev_{key}"
+    if key in st.session_state and st.session_state.get(prev_key) is not None:
+        if st.session_state[key] != st.session_state[prev_key]:
+            # 사용자가 방금 이 위젯을 직접 수정함 -> 공유 상태에 반영
+            shared = st.session_state[key]
+            st.session_state["shared_smartstore_url"] = shared
+
+    st.session_state[key] = shared
+    st.session_state[prev_key] = shared
+
+
 _KOREAN_FONT_CANDIDATES = [
     "fonts/NanumGothic.ttf",
     "title_generator/fonts/NanumGothic.ttf",
@@ -820,6 +869,36 @@ with tab1:
         "네이버 광고주 센터 데이터를 기반으로 100byte SEO 상품명을 자동 조합합니다."
     )
 
+    _sync_shared_url("tab1_smartstore_url")
+    ss_link_col1, ss_link_col2 = st.columns([3, 1])
+    with ss_link_col1:
+        tab1_smartstore_url = st.text_input(
+            "스마트스토어 상품 링크 (선택) — 입력하면 상품명을 자동으로 불러옵니다",
+            placeholder="https://smartstore.naver.com/.../products/...",
+            key="tab1_smartstore_url",
+        )
+    with ss_link_col2:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        fetch_name_clicked = st.button(
+            "🔍 상품명 불러오기",
+            key="tab1_fetch_name_btn",
+            use_container_width=True,
+        )
+
+    if fetch_name_clicked:
+        if not tab1_smartstore_url.strip():
+            st.warning("⚠️ 스마트스토어 링크를 입력해주세요.")
+        else:
+            with st.spinner("상품 정보를 조회하는 중입니다..."):
+                fetched_name, name_err = fetch_naver_product_name(
+                    tab1_smartstore_url.strip()
+                )
+            if name_err:
+                st.error(f"⚠️ {name_err}")
+            else:
+                st.session_state["tg_product_type"] = fetched_name
+                st.success(f"✅ 상품명을 불러왔습니다: {fetched_name}")
+
     product_type = st.text_input(
         "상품 종류/기본명",
         placeholder="예: 차량용 무선 선풍기",
@@ -968,6 +1047,16 @@ with tab1:
 - 위 단어들은 브랜드명/특징/타겟 입력값에 있더라도 최종 상품명 문구에 절대 그대로 쓰지 마.
 - 타겟 표현이 꼭 필요하면 "키즈", "주니어" 등 안전한 단어로 바꾸거나, 아예 생략해.
 
+[절대 금지어 - 마켓 SEO 제재 위험 수식어]
+{', '.join(MARKET_BANNED_WORDS)}
+
+[절대 금지어 - 상표권/지식재산권 위험 단어]
+{', '.join(TRADEMARK_RISK_WORDS)}
+- 위 단어와 동일하거나 이를 그대로 연상시키는 표현은 절대 사용하지 마.
+
+[절대 금지어 - 의료기기/화장품법 오인 표현 (인증 없이 사용 시 위법)]
+{', '.join(MEDICAL_CLAIM_WORDS)}
+
 [바이트 규칙 - 매우 중요]
 - 한글 1자 = 2Byte, 영문/숫자/기호 1자 = 1Byte 기준으로 계산.
 - 각 상품명은 90~100Byte 사이가 되도록 100Byte에 최대한 가깝게 길게 작성해.
@@ -976,9 +1065,7 @@ with tab1:
 [기타 제약]
 1. 가장 첫머리에는 반드시 브랜드명 {brand_name}을(를) 대괄호나 특수문자로 감싸지 말고 텍스트 그대로 배치할 것 (예: [{brand_name}]이 아니라 {brand_name}).
 2. 키워드는 검색량 높은 순서대로 배치할 것.
-3. '최저가', '1+1', '특가', '무료배송' 등 수식어나 금지어는 절대 제외할 것.
-4. 저작권 및 상표권 문제가 없는 안전한 단어만 활용할 것.
-5. 서로 다른 느낌의 상품명 3가지를 만들 것.
+3. 서로 다른 느낌의 상품명 3가지를 만들 것.
 
 [출력 형식 - 반드시 이 4줄 형식으로만 출력. 다른 문장은 절대 추가하지 마]
 TITLE1: <상품명1>
@@ -1079,33 +1166,6 @@ KEYWORDS: <활용 키워드 20개를 검색량 높은 순으로 쉼표(,)로 구
                     if candidate_models:
                         with st.expander("조회된 사용 가능 모델 목록 보기"):
                             st.write(candidate_models)
-
-    st.markdown("---")
-    st.markdown("#### 🚨 키워드 금지어 / 지식재산권 사전 검수기")
-    st.caption(
-        "최종 등록 전에 상품명·상세페이지 문구를 붙여넣어 빠르게 확인하세요. "
-        "⚠️ 참고용 필터입니다 — 상표권 위험 단어 목록은 자주 발생하는 사례 "
-        "위주의 샘플이며 법적 안전을 보장하지 않습니다. 애매한 경우 반드시 "
-        "별도로 확인하세요."
-    )
-    check_text = st.text_area(
-        "검수할 문구를 붙여넣으세요 (상품명, 상세페이지 문구 등)",
-        height=100,
-        key="tg_check_text",
-    )
-    if st.button("🔍 지금 검수하기", key="tg_check_btn"):
-        if not check_text.strip():
-            st.warning("⚠️ 검수할 문구를 입력해주세요.")
-        else:
-            findings = check_prohibited_terms(check_text)
-            if not findings:
-                st.success(
-                    "✅ 등록된 금지어 목록 기준으로는 특이사항이 발견되지 "
-                    "않았습니다."
-                )
-            else:
-                for label, hits in findings.items():
-                    st.error(f"{label}: {', '.join(hits)}")
 
 # ==================================================================
 # TAB 2: 마켓별 판매가 계산기
@@ -1237,9 +1297,12 @@ with tab2:
                 unsafe_allow_html=True,
             )
 
+        if smartstore_url:
+            st.session_state["price_url_input"] = smartstore_url
+        _sync_shared_url("price_url_input")
+
         input_url = st.text_input(
             "스마트스토어 주소",
-            value=smartstore_url,
             placeholder="https://smartstore.naver.com/...",
             key="price_url_input",
         )
@@ -1450,6 +1513,7 @@ with tab3:
             help="지마켓/옥션/쿠팡 등 국내 오픈마켓이 요구하는 상세페이지 표준 폭 "
             "(보통 860px)에 맞춰 자동으로 리사이즈합니다. 필요시 값을 바꾸세요.",
         )
+        _sync_shared_url("detail_smartstore_url")
         smartstore_link = st.text_input(
             "스마트스토어 상품 URL",
             placeholder="https://smartstore.naver.com/.../products/...",
