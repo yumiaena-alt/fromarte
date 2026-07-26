@@ -1385,14 +1385,19 @@ with tab3:
                         st.rerun()
 
             if active_blocks:
-                total_h = sum(b.height for b in active_blocks)
+                block_gap = 20
+                total_h = sum(b.height for b in active_blocks) + block_gap * (
+                    len(active_blocks) - 1
+                )
                 stacked = Image.new(
                     "RGB", (detail_target_width, total_h), (255, 255, 255)
                 )
                 y = 0
-                for b in active_blocks:
+                for i, b in enumerate(active_blocks):
                     stacked.paste(b, (0, y))
                     y += b.height
+                    if i < len(active_blocks) - 1:
+                        y += block_gap
                 st.session_state["detail_link_main_img"] = stacked
             else:
                 st.session_state["detail_link_main_img"] = None
