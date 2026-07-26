@@ -112,11 +112,32 @@ def fetch_naver_api_price(smartstore_url):
     return None
 
 
+def _parse_text_align(raw_html):
+    m = re.search(r"text-align:\s*(left|right|center)", raw_html)
+    return m.group(1) if m else "center"
+
+
+def _parse_text_color(raw_html):
+    m = re.search(r"color:\s*rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)", raw_html)
+    if m:
+        return tuple(int(x) for x in m.groups())
+    m = re.search(r"color:\s*#([0-9a-fA-F]{6})\b", raw_html)
+    if m:
+        h = m.group(1)
+        return tuple(int(h[i : i + 2], 16) for i in (0, 2, 4))
+    m = re.search(r"color:\s*#([0-9a-fA-F]{3})\b", raw_html)
+    if m:
+        h = m.group(1)
+        return tuple(int(c * 2, 16) for c in h)
+    return (51, 51, 51)
+
+
 def _parse_detail_content_segments(html):
     """detailContent HTML을 순서대로 순회하여 텍스트/이미지행 세그먼트로 변환.
-    각 세그먼트는 ("text", 문자열, 폰트크기) 또는 ("images", [url, ...]) 형태이며,
-    같은 블록 안에 나란히 있던 이미지들은 하나의 "행"으로 묶어 반환한다
-    (개별 확대로 인한 화질 저하를 막기 위해 나중에 행 단위로 리사이즈한다)."""
+    각 세그먼트는 ("text", 문자열, 폰트크기, 정렬, 색상) 또는
+    ("images", [url, ...]) 형태이며, 같은 블록 안에 나란히 있던 이미지들은
+    하나의 "행"으로 묶어 반환한다 (개별 확대로 인한 화질 저하를 막기 위해
+    나중에 행 단위로 리사이즈한다)."""
     soup = BeautifulSoup(html or "", "html.parser")
     segments = []
 
@@ -133,8 +154,12 @@ def _parse_detail_content_segments(html):
                     int(s) for s in re.findall(r"font-size:\s*(\d+)px", raw_all)
                 ]
                 font_size = max(min(max(sizes), 48), 16) if sizes else 26
+                align = _parse_text_align(raw_all)
+                color = _parse_text_color(raw_all)
                 if joined.strip():
-                    segments.append(("text", joined.strip(), font_size))
+                    segments.append(
+                        ("text", joined.strip(), font_size, align, color)
+                    )
             pending_text = []
 
         def flush_imgs():
@@ -256,12 +281,13 @@ def _wrap_text_lines(draw, text, font, max_width):
     return lines
 
 
-def render_text_segment(text, width, font_size=26):
-    """텍스트를 상세페이지 폭에 맞춰 이미지로 렌더링 (원래 위치에 끼워 넣기 위함)."""
+def render_text_segment(text, width, font_size=26, align="center", color=(51, 51, 51)):
+    """텍스트를 상세페이지 폭에 맞춰 이미지로 렌더링 (원래 위치/정렬/색상을 반영)."""
     font = _get_korean_font(font_size)
     tmp_draw = ImageDraw.Draw(Image.new("RGB", (10, 10)))
     padding_x = 24
-    lines = _wrap_text_lines(tmp_draw, text, font, width - padding_x * 2)
+    max_width = width - padding_x * 2
+    lines = _wrap_text_lines(tmp_draw, text, font, max_width)
 
     ascent, descent = font.getmetrics()
     line_height = ascent + descent + 12
@@ -271,7 +297,14 @@ def render_text_segment(text, width, font_size=26):
     draw = ImageDraw.Draw(img)
     y = 12
     for line in lines:
-        draw.text((padding_x, y), line, font=font, fill=(51, 51, 51))
+        line_w = draw.textlength(line, font=font) if line else 0
+        if align == "center":
+            x = padding_x + max(0, (max_width - line_w) / 2)
+        elif align == "right":
+            x = width - padding_x - line_w
+        else:
+            x = padding_x
+        draw.text((x, y), line, font=font, fill=color)
         y += line_height
     return img
 
@@ -1196,10 +1229,14 @@ with tab3:
                     ):
                         for seg in segments:
                             if seg[0] == "text":
-                                _, text, font_size = seg
+                                _, text, font_size, align, color = seg
                                 built_blocks.append(
                                     render_text_segment(
-                                        text, detail_target_width, font_size
+                                        text,
+                                        detail_target_width,
+                                        font_size,
+                                        align,
+                                        color,
                                     )
                                 )
                                 continue
