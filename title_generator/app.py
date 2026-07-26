@@ -254,7 +254,7 @@ def _get_korean_font(size):
     return ImageFont.load_default()
 
 
-def _wrap_text_lines(draw, text, font, max_width):
+def _wrap_text_lines(draw, text, font, max_width, max_chars=40):
     lines = []
     for paragraph in text.split("\n"):
         if not paragraph.strip():
@@ -264,7 +264,11 @@ def _wrap_text_lines(draw, text, font, max_width):
         current = ""
         for word in words:
             candidate = (current + " " + word).strip()
-            if not current or draw.textlength(candidate, font=font) <= max_width:
+            fits = (
+                draw.textlength(candidate, font=font) <= max_width
+                and len(candidate) <= max_chars
+            )
+            if not current or fits:
                 current = candidate
             else:
                 lines.append(current)
@@ -286,8 +290,9 @@ def _wrap_text_lines(draw, text, font, max_width):
 
 def render_text_segment(text, width, font_size=26, align="center", color=(51, 51, 51)):
     """텍스트를 상세페이지 폭에 맞춰 이미지로 렌더링 (원래 위치/정렬/색상을 반영)."""
-    # 문장이 이어져서 너무 길어지지 않도록 마침표 뒤는 항상 줄바꿈한다.
-    text = re.sub(r"\.\s*", ".\n", text).strip()
+    # 문장이 이어져서 너무 길어지지 않도록 마침표 뒤는 줄바꿈하되,
+    # "8.5cm" 같은 소수점 숫자는 그대로 둔다 (앞뒤가 숫자면 건너뜀).
+    text = re.sub(r"(?<!\d)\.(?!\d)\s*", ".\n", text).strip()
 
     font = _get_korean_font(font_size)
     tmp_draw = ImageDraw.Draw(Image.new("RGB", (10, 10)))
@@ -296,12 +301,12 @@ def render_text_segment(text, width, font_size=26, align="center", color=(51, 51
     lines = _wrap_text_lines(tmp_draw, text, font, max_width)
 
     ascent, descent = font.getmetrics()
-    line_height = ascent + descent + 12
-    total_height = max(line_height * max(len(lines), 1) + 24, 40)
+    line_height = ascent + descent + 8
+    total_height = max(line_height * max(len(lines), 1) + 16, 32)
 
     img = Image.new("RGB", (width, total_height), (255, 255, 255))
     draw = ImageDraw.Draw(img)
-    y = 12
+    y = 8
     for line in lines:
         line_w = draw.textlength(line, font=font) if line else 0
         if align == "center":
@@ -1327,10 +1332,15 @@ with tab3:
             for idx, block in enumerate(raw_blocks):
                 if not keep_map.get(idx, True):
                     continue
-                st.image(block, use_container_width=True)
-                if st.button("🗑️ 이 블록 삭제", key=f"detail_block_del_{idx}"):
-                    keep_map[idx] = False
-                    st.rerun()
+                with st.container(border=True):
+                    st.image(block, use_container_width=True)
+                    if st.button(
+                        "🗑️ 위 블록 삭제",
+                        key=f"detail_block_del_{idx}",
+                        use_container_width=True,
+                    ):
+                        keep_map[idx] = False
+                        st.rerun()
 
             kept_blocks = [
                 b for i, b in enumerate(raw_blocks) if keep_map.get(i, True)
