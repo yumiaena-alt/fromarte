@@ -1,5 +1,5 @@
-bcrypt
-requests
+streamlit
 pandas
 openpyxl
-streamlit
+requests
+google-generativeai
