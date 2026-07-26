@@ -40,6 +40,35 @@ st.write("원하시는 기능을 상단 탭에서 선택하여 사용하세요."
 # ------------------------------------------------------------------
 
 
+def _get_naver_commerce_token():
+    """네이버 커머스 API OAuth2 access token 발급 (실패 사유를 함께 반환)."""
+    client_id = st.secrets.get("NAVER_CLIENT_ID") or os.environ.get(
+        "NAVER_CLIENT_ID"
+    )
+    client_secret = st.secrets.get("NAVER_CLIENT_SECRET") or os.environ.get(
+        "NAVER_CLIENT_SECRET"
+    )
+
+    if not client_id or not client_secret:
+        return None, "NAVER_CLIENT_ID / NAVER_CLIENT_SECRET가 등록되지 않았습니다."
+
+    try:
+        token_url = "https://api.commerce.naver.com/external/v1/oauth2/token"
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "client_credentials",
+            "type": "SELF",
+        }
+        token_res = requests.post(token_url, data=token_data, timeout=10)
+        access_token = token_res.json().get("access_token")
+        if not access_token:
+            return None, f"토큰 발급 실패: {token_res.text}"
+        return access_token, None
+    except Exception as e:
+        return None, f"네이버 커머스 API 토큰 발급 실패: {e}"
+
+
 @st.cache_data(ttl=60)
 def fetch_naver_api_price(smartstore_url):
     if not smartstore_url or "smartstore.naver.com" not in smartstore_url:
@@ -51,30 +80,11 @@ def fetch_naver_api_price(smartstore_url):
 
     product_id = match.group(1)
 
-    client_id = st.secrets.get("NAVER_CLIENT_ID") or os.environ.get(
-        "NAVER_CLIENT_ID"
-    )
-    client_secret = st.secrets.get("NAVER_CLIENT_SECRET") or os.environ.get(
-        "NAVER_CLIENT_SECRET"
-    )
-
-    if not client_id or not client_secret:
+    access_token, err = _get_naver_commerce_token()
+    if err:
         return None
 
     try:
-        token_url = "https://api.commerce.naver.com/external/v1/oauth2/token"
-        token_data = {
-            "client_id": client_id,
-            "client_secret": client_secret,
-            "grant_type": "client_credentials",
-            "type": "SELF",
-        }
-        token_res = requests.post(token_url, data=token_data, timeout=5)
-        access_token = token_res.json().get("access_token")
-
-        if not access_token:
-            return None
-
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
         res = requests.get(api_url, headers=headers, timeout=5)
@@ -88,6 +98,57 @@ def fetch_naver_api_price(smartstore_url):
     except Exception:
         pass
     return None
+
+
+def _extract_image_urls_from_html(html):
+    urls = re.findall(
+        r'<img[^>]+src=["\']([^"\']+)["\']', html or "", re.IGNORECASE
+    )
+    cleaned = []
+    for u in urls:
+        if u.startswith("//"):
+            u = "https:" + u
+        if u.startswith("http"):
+            cleaned.append(u)
+    return cleaned
+
+
+def fetch_naver_product_detail_images(smartstore_url):
+    """네이버 커머스 API로 상품 상세페이지에 삽입된 이미지 URL 목록을 가져온다."""
+    if not smartstore_url or "smartstore.naver.com" not in smartstore_url:
+        return None, "스마트스토어 상품 URL이 아닙니다."
+
+    match = re.search(r"products/(\d+)", smartstore_url)
+    if not match:
+        return None, "URL에서 상품 번호를 찾지 못했습니다."
+    product_id = match.group(1)
+
+    access_token, err = _get_naver_commerce_token()
+    if err:
+        return None, err
+
+    try:
+        api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        res = requests.get(api_url, headers=headers, timeout=15)
+        res.raise_for_status()
+        data = res.json()
+    except Exception as e:
+        return None, f"상품 정보 조회 실패: {e}"
+
+    origin_product = data.get("originProduct", {}) or {}
+    detail_content = (
+        origin_product.get("detailContent") or data.get("detailContent") or ""
+    )
+
+    image_urls = _extract_image_urls_from_html(detail_content)
+    if not image_urls:
+        return None, (
+            "상세페이지 이미지를 응답에서 찾지 못했습니다 "
+            "(detailContent가 비어있거나 형식이 다를 수 있습니다)."
+        )
+
+    return image_urls, None
 
 
 def _naver_ad_signature(secret_key, timestamp, method, uri):
@@ -889,7 +950,8 @@ with tab2:
 with tab3:
     st.subheader("🖼️ 상세페이지 + 하단 배너 자동 병합기")
     st.caption(
-        "상세페이지 캡처 이미지를 업로드하면 주문제작/AI 안내 하단 배너를 자동으로 합쳐줍니다."
+        "상세페이지 이미지를 업로드하거나 스마트스토어 상품 링크로 바로 가져와서 "
+        "주문제작/AI 안내 하단 배너를 자동으로 합쳐줍니다."
     )
 
     DETAIL_FOOTER_URL = "https://gi.esmplus.com/fromarte/wholesale/order.png"
@@ -908,14 +970,122 @@ with tab3:
             st.error(f"하단 배너 이미지를 불러오는 데 실패했습니다: {e}")
             return None
 
-    detail_uploaded_file = st.file_uploader(
-        "상세페이지 캡처 이미지를 선택하세요 (JPG, PNG)",
-        type=["jpg", "jpeg", "png"],
-        key="detail_uploader",
+    detail_input_method = st.radio(
+        "상세페이지 가져오는 방식",
+        ["📤 이미지 업로드", "🔗 스마트스토어 링크로 가져오기"],
+        horizontal=True,
+        key="detail_input_method",
     )
 
-    if detail_uploaded_file is not None:
-        main_img = Image.open(detail_uploaded_file).convert("RGB")
+    main_img = None
+    source_name = "detail_page"
+
+    if detail_input_method == "📤 이미지 업로드":
+        detail_uploaded_file = st.file_uploader(
+            "상세페이지 캡처 이미지를 선택하세요 (JPG, PNG)",
+            type=["jpg", "jpeg", "png"],
+            key="detail_uploader",
+        )
+        if detail_uploaded_file is not None:
+            main_img = Image.open(detail_uploaded_file).convert("RGB")
+            source_name = detail_uploaded_file.name.rsplit(".", 1)[0]
+    else:
+        detail_target_width = st.number_input(
+            "상세페이지 폭 (px) — 국내 오픈마켓 표준 폭에 맞춰 리사이즈됩니다",
+            min_value=300,
+            max_value=2000,
+            value=860,
+            step=10,
+            key="detail_target_width",
+            help="지마켓/옥션/쿠팡 등 국내 오픈마켓이 요구하는 상세페이지 표준 폭 "
+            "(보통 860px)에 맞춰 자동으로 리사이즈합니다. 필요시 값을 바꾸세요.",
+        )
+        smartstore_link = st.text_input(
+            "스마트스토어 상품 URL",
+            placeholder="https://smartstore.naver.com/.../products/...",
+            key="detail_smartstore_url",
+        )
+        fetch_clicked = st.button("📥 상세페이지 가져오기", key="detail_fetch_btn")
+
+        if fetch_clicked:
+            if not smartstore_link.strip():
+                st.warning("⚠️ 스마트스토어 상품 URL을 입력해주세요.")
+            else:
+                with st.spinner("상세페이지 이미지를 조회하는 중입니다..."):
+                    image_urls, err = fetch_naver_product_detail_images(
+                        smartstore_link.strip()
+                    )
+
+                if err:
+                    st.error(f"⚠️ {err}")
+                    st.session_state["detail_link_main_img"] = None
+                else:
+                    fetched_images = []
+                    failed_count = 0
+                    with st.spinner(
+                        f"이미지 {len(image_urls)}개를 고화질로 다운로드하는 중입니다..."
+                    ):
+                        for img_url in image_urls:
+                            try:
+                                img_res = requests.get(
+                                    img_url,
+                                    headers={
+                                        "User-Agent": "Mozilla/5.0",
+                                        "Referer": "https://smartstore.naver.com/",
+                                    },
+                                    timeout=15,
+                                )
+                                img_res.raise_for_status()
+                                img = Image.open(
+                                    io.BytesIO(img_res.content)
+                                ).convert("RGB")
+                                fetched_images.append(img)
+                            except Exception:
+                                failed_count += 1
+
+                    if not fetched_images:
+                        st.error("⚠️ 이미지를 하나도 다운로드하지 못했습니다.")
+                        st.session_state["detail_link_main_img"] = None
+                    else:
+                        resized_images = []
+                        for img in fetched_images:
+                            w, h = img.size
+                            new_h = int(h * (detail_target_width / w))
+                            resized_images.append(
+                                img.resize(
+                                    (detail_target_width, new_h),
+                                    Image.Resampling.LANCZOS,
+                                )
+                            )
+
+                        total_h = sum(img.height for img in resized_images)
+                        stacked = Image.new(
+                            "RGB", (detail_target_width, total_h)
+                        )
+                        y = 0
+                        for img in resized_images:
+                            stacked.paste(img, (0, y))
+                            y += img.height
+
+                        st.session_state["detail_link_main_img"] = stacked
+
+                        if failed_count:
+                            st.warning(
+                                f"⚠️ 이미지 {failed_count}개는 다운로드에 실패해 "
+                                "제외했습니다."
+                            )
+                        st.success(
+                            f"✅ 이미지 {len(fetched_images)}개를 "
+                            f"{detail_target_width}px 폭으로 합쳤습니다."
+                        )
+
+        stored_img = st.session_state.get("detail_link_main_img")
+        if stored_img is not None:
+            main_img = stored_img
+            id_match = re.search(r"products/(\d+)", smartstore_link or "")
+            source_name = f"product_{id_match.group(1)}" if id_match else "detail_page"
+
+    if main_img is not None:
         footer_img = load_footer_image(DETAIL_FOOTER_URL)
 
         if footer_img is not None:
@@ -945,8 +1115,7 @@ with tab3:
             combined_img.save(buf, format="JPEG", quality=95)
             byte_im = buf.getvalue()
 
-            original_name = detail_uploaded_file.name.rsplit(".", 1)[0]
-            output_filename = f"{original_name}_final.jpg"
+            output_filename = f"{source_name}_final.jpg"
 
             st.download_button(
                 label="📥 완성된 상세페이지 다운로드",
