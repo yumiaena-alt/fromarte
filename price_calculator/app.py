@@ -15,7 +15,7 @@ st.write(
 )
 
 # ------------------------------------------------------------------
-# 1. 네이버 커머스 API 연동 함수 (100% 실시간 공식 가격 수집)
+# 1. 네이버 커머스 API 연동 함수 (실시간 공식 판매가)
 # ------------------------------------------------------------------
 
 
@@ -31,15 +31,19 @@ def fetch_naver_api_price(smartstore_url):
 
     product_id = match.group(1)
 
-    # Streamlit Secrets에서 API Key 가져오기
-    client_id = st.secrets.get("NAVER_CLIENT_ID")
-    client_secret = st.secrets.get("NAVER_CLIENT_SECRET")
+    # Secrets 및 환경변수 확인
+    client_id = st.secrets.get("NAVER_CLIENT_ID") or os.environ.get(
+        "NAVER_CLIENT_ID"
+    )
+    client_secret = st.secrets.get("NAVER_CLIENT_SECRET") or os.environ.get(
+        "NAVER_CLIENT_SECRET"
+    )
 
     if not client_id or not client_secret:
-        return None, "Streamlit Secrets에 NAVER API 키 설정이 필요합니다."
+        return None, "Streamlit Secrets 설정이 필요합니다."
 
     try:
-        # 네이버 커머스 API 토큰 발급
+        # 1) 토큰 발급
         token_url = "https://api.commerce.naver.com/external/v1/oauth2/token"
         token_data = {
             "client_id": client_id,
@@ -47,36 +51,30 @@ def fetch_naver_api_price(smartstore_url):
             "grant_type": "client_credentials",
             "type": "SELF",
         }
-        token_res = requests.post(token_url, data=token_data, timeout=3)
-        access_token = token_res.json().get("access_token")
+        token_res = requests.post(token_url, data=token_data, timeout=5)
+        token_json = token_res.json()
+        access_token = token_json.get("access_token")
 
         if not access_token:
-            return None, "네이버 API 인증 토큰 발급 실패"
+            return None, "API 토큰 발급 실패"
 
-        # 상품 상세 정보 조회 API 호출
+        # 2) 상품 상세 조회
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
-        res = requests.get(api_url, headers=headers, timeout=3)
+        res = requests.get(api_url, headers=headers, timeout=5)
         data = res.json()
 
-        # 실시간 할인가(또는 기본가) 추출
-        sale_price = (
-            data.get("originProduct", {})
-            .get("detailAttribute", {})
-            .get("optionInfo", {})
-            .get("optionPrice", 0)
-        )
-        discount_price = data.get("originProduct", {}).get("salePrice", 0)
+        # 실시간 가격 추출 (할인가 또는 기준가)
+        origin_product = data.get("originProduct", {})
+        discount_price = origin_product.get("salePrice", 0)
 
-        final_price = discount_price if discount_price > 0 else sale_price
-
-        if final_price > 0:
-            return final_price, "성공"
+        if discount_price > 0:
+            return int(discount_price), "성공"
         else:
-            return None, "가격 정보 없음"
+            return None, "상품 가격 정보를 찾을 수 없습니다."
 
     except Exception as e:
-        return None, f"API 접속 오류: {str(e)}"
+        return None, f"API 접속 오류 ({str(e)})"
 
 
 # ------------------------------------------------------------------
@@ -246,7 +244,7 @@ with col2:
         st.link_button("🔗 스마트스토어 상품페이지 직접 열기", input_url.strip())
 
 # ------------------------------------------------------------------
-# 5. 마켓별 판매가 자동 계산 및 API 실시간 판매가 출력
+# 5. 마켓별 판매가 자동 계산 및 API 연동 판매가 출력
 # ------------------------------------------------------------------
 if input_yuan > 0:
 
@@ -268,18 +266,18 @@ if input_yuan > 0:
 
     b5_12 = roundup_100(b5_recommend * 1.2)
 
-    # 네이버 커머스 API 실시간 가격 조회
+    # 네이버 공식 커머스 API로 실시간가 조회
     api_price, api_msg = fetch_naver_api_price(input_url)
 
     if api_price:
-        smartstore_display_price = f"{api_price:,}원 (네이버 공식 API)"
+        smartstore_display_price = f"{api_price:,}원 (네이버 공식 API 연동)"
     elif db_selling_price > 0:
         smartstore_display_price = f"{db_selling_price:,}원 (전산등록가)"
     else:
-        smartstore_display_price = f"조회 불가능 ({api_msg})"
+        smartstore_display_price = f"조회 실패 ({api_msg})"
 
     prices = {
-        "🏷️ 현재 스마트스토어 실시간 판매가": smartstore_display_price,
+        "🏷️ 네이버 스마트스토어 실제 판매가": smartstore_display_price,
         "추천 소비자가": b4_consumer,
         "추천 판매가 (기준가)": b5_recommend,
         "--- 도매 마켓 그룹 ---": "",
