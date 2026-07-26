@@ -19,14 +19,18 @@ st.write(
 # ------------------------------------------------------------------
 
 
-@st.cache_data(ttl=60)
 def fetch_naver_api_price(smartstore_url):
-    if not smartstore_url or "smartstore.naver.com" not in smartstore_url:
-        return None
+    """스마트스토어 URL에서 상품ID를 추출하여 네이버 Commerce API로 판매가를 조회합니다."""
+    if not smartstore_url or not isinstance(smartstore_url, str):
+        return None, "주소가 입력되지 않았습니다."
 
+    # URL에서 상품 ID(숫자) 추출 (다양한 URL 패턴 대응)
     match = re.search(r"products/(\d+)", smartstore_url)
     if not match:
-        return None
+        return (
+            None,
+            "URL 형태가 올바르지 않습니다. (예: .../products/12345678)",
+        )
 
     product_id = match.group(1)
 
@@ -38,9 +42,13 @@ def fetch_naver_api_price(smartstore_url):
     )
 
     if not client_id or not client_secret:
-        return None
+        return (
+            None,
+            "네이버 API Client ID 또는 Secret이 설정되지 않았습니다. (.streamlit/secrets.toml 확인)",
+        )
 
     try:
+        # 1. 토큰 발급
         token_url = "https://api.commerce.naver.com/external/v1/oauth2/token"
         token_data = {
             "client_id": client_id,
@@ -49,24 +57,39 @@ def fetch_naver_api_price(smartstore_url):
             "type": "SELF",
         }
         token_res = requests.post(token_url, data=token_data, timeout=5)
+
+        if token_res.status_code != 200:
+            return (
+                None,
+                f"토큰 발급 실패 (상태 코드: {token_res.status_code}, 내용: {token_res.text})",
+            )
+
         access_token = token_res.json().get("access_token")
-
         if not access_token:
-            return None
+            return None, "토큰 발급 응답에 access_token이 없습니다."
 
+        # 2. 상품 상세 정보 조회
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
         res = requests.get(api_url, headers=headers, timeout=5)
-        data = res.json()
 
+        if res.status_code != 200:
+            return (
+                None,
+                f"상품 API 조회 실패 (상태 코드: {res.status_code}, 내용: {res.text})",
+            )
+
+        data = res.json()
         origin_product = data.get("originProduct", {})
         discount_price = origin_product.get("salePrice", 0)
 
         if discount_price > 0:
-            return int(discount_price)
-    except Exception:
-        pass
-    return None
+            return int(discount_price), "성공"
+        else:
+            return None, "상품 판매가가 0원입니다."
+
+    except Exception as e:
+        return None, f"API 통신 오류: {str(e)}"
 
 
 # ------------------------------------------------------------------
@@ -159,7 +182,9 @@ if db is not None:
             if smartstore_url == "nan":
                 smartstore_url = ""
 
-            st.success(f"⚡ 1건 매칭되어 자동 선택됨: **{selected_product_name}**")
+            st.success(
+                f"⚡ 1건 매칭되어 자동 선택됨: **{selected_product_name}**"
+            )
 
         elif count > 1:
             options = ["-- 아래 목록에서 상품 선택 --"] + filtered_db[
@@ -236,18 +261,25 @@ with col2:
         st.link_button("🔗 스마트스토어 상품페이지 직접 열기", input_url.strip())
 
 # 스마트스토어 실시간 API 또는 전산 등록가 자동 추출 및 출처 판단
-api_fetched_price = fetch_naver_api_price(input_url)
+api_fetched_price, api_msg = fetch_naver_api_price(input_url)
 default_ss_price = 0
+price_status_type = ""
 price_source_badge = ""
 
-if api_fetched_price:
+if api_fetched_price is not None:
     default_ss_price = api_fetched_price
+    price_status_type = "success"
     price_source_badge = "🟢 **네이버 공식 API**로 불러온 실시간 판매가입니다."
 elif db_selling_price > 0:
     default_ss_price = db_selling_price
-    price_source_badge = "🔵 **전산 DB 엑셀**에 등록되어 있던 판매가입니다."
+    price_status_type = "error"
+    # 📌 요청사항: DB 등록가는 확인용이므로 눈에 띄게 붉게 강조
+    price_source_badge = f"🚨 **[주의] 네이버 API 연동 실패 ({api_msg})**\n\n이 금액은 API 실시간가가 아닌 **전산 DB 엑셀에 등록되어 있던 옛날 판매가**입니다. 실제 스마트스토어 판매가와 다를 수 있으니 반드시 확인 후 수정해 주세요!"
 else:
-    price_source_badge = "⚪ 등록된 가격이 없어 0원으로 표시됩니다. (직접 입력 가능)"
+    price_status_type = "info"
+    price_source_badge = (
+        "⚪ 등록된 가격이 없어 0원으로 표시됩니다. (직접 입력 가능)"
+    )
 
 col_ss1, col_ss2 = st.columns([2, 1])
 with col_ss1:
@@ -257,8 +289,14 @@ with col_ss1:
         step=100,
         help="주소를 통해 자동 수집된 가격이 있거나 직접 변경할 금액을 입력하세요.",
     )
-    # 📌 금액 출처 표기 (API vs 전산 DB vs 미등록)
-    st.caption(price_source_badge)
+
+    # 📌 출처 표기 시각화 (API 실패 및 DB 등록가인 경우 st.error 붉은 박스로 표시)
+    if price_status_type == "error":
+        st.error(price_source_badge)
+    elif price_status_type == "success":
+        st.success(price_source_badge)
+    else:
+        st.caption(price_source_badge)
 
 # ------------------------------------------------------------------
 # 5. 스마트스토어 판매가 비교 및 재계산 로직
