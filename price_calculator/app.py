@@ -422,6 +422,20 @@ def upload_to_esm_via_selenium(image_bytes, filename, folder="wholesale"):
 
         driver.get("https://im.esmplus.com/")
 
+        # 로그인 화면은 좌측 "옥션/지마켓 로그인", 우측 "ESM PLUS 마스터 로그인"
+        # 두 패널로 나뉘어 있다. 반드시 좌측 패널에서 "지마켓"을 선택한 뒤
+        # 그 패널 안의 아이디/비밀번호로 로그인해야 한다.
+        try:
+            gmarket_option = wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//*[contains(text(),'지마켓') or contains(text(),'G마켓')]")
+                )
+            )
+            gmarket_option.click()
+            time.sleep(0.5)
+        except Exception:
+            pass  # 이미 지마켓이 기본 선택되어 있거나 화면 구조가 다를 수 있음
+
         id_input = wait.until(
             EC.presence_of_element_located((By.XPATH, "//input[@type='text']"))
         )
@@ -429,11 +443,15 @@ def upload_to_esm_via_selenium(image_bytes, filename, folder="wholesale"):
         id_input.send_keys(esm_id)
         pw_input.send_keys(esm_pw)
 
-        login_btn = driver.find_element(
-            By.XPATH,
-            "//button[contains(translate(text(),'login','LOGIN'),'LOGIN')] "
-            "| //button[contains(text(),'로그인')]",
-        )
+        try:
+            # 방금 입력한 아이디 입력창과 같은 폼(패널) 안의 로그인 버튼을 찾는다.
+            login_btn = id_input.find_element(By.XPATH, "./ancestor::form[1]//button")
+        except Exception:
+            login_btn = driver.find_element(
+                By.XPATH,
+                "//button[contains(translate(text(),'login','LOGIN'),'LOGIN')] "
+                "| //button[contains(text(),'로그인')]",
+            )
         login_btn.click()
 
         wait.until(
