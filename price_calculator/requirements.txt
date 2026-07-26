@@ -1,2 +1,5 @@
+bcrypt
+requests
 pandas
 openpyxl
+streamlit
