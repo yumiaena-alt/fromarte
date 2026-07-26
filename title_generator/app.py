@@ -115,6 +115,11 @@ def fetch_naver_related_keywords(seed_keyword):
             "Streamlit Secrets 설정을 확인해주세요."
         )
 
+    # 네이버 hintKeywords는 띄어쓰기/특수문자가 있으면 무효 처리되므로 제거
+    clean_keyword = re.sub(r"[^0-9A-Za-z가-힣]", "", seed_keyword)
+    if not clean_keyword:
+        return None, "키워드에 한글/영문/숫자 외의 문자만 있어 조회할 수 없습니다."
+
     uri = "/keywordstool"
     method = "GET"
     timestamp = str(int(time.time() * 1000))
@@ -126,7 +131,7 @@ def fetch_naver_related_keywords(seed_keyword):
         "X-Customer": str(customer_id),
         "X-Signature": signature,
     }
-    params = {"hintKeywords": seed_keyword, "showDetail": "1"}
+    params = {"hintKeywords": clean_keyword, "showDetail": "1"}
 
     try:
         res = requests.get(
