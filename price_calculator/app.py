@@ -1,8 +1,8 @@
 import math
 import os
 import re
-import urllib.request
 import pandas as pd
+import requests
 import streamlit as st
 
 st.set_page_config(
@@ -15,45 +15,68 @@ st.write(
 )
 
 # ------------------------------------------------------------------
-# 1. 스마트스토어 실제 판매가 크롤링 함수
+# 1. 네이버 커머스 API 연동 함수 (100% 실시간 공식 가격 수집)
 # ------------------------------------------------------------------
 
 
-@st.cache_data(ttl=300)
-def fetch_smartstore_real_price(url):
-    if not url or "smartstore.naver.com" not in url:
-        return None
+@st.cache_data(ttl=60)
+def fetch_naver_api_price(smartstore_url):
+    if not smartstore_url or "smartstore.naver.com" not in smartstore_url:
+        return None, "유효한 스마트스토어 주소가 아닙니다."
+
+    # URL에서 상품 ID(숫자) 추출
+    match = re.search(r"products/(\d+)", smartstore_url)
+    if not match:
+        return None, "상품 ID를 추출할 수 없습니다."
+
+    product_id = match.group(1)
+
+    # Streamlit Secrets에서 API Key 가져오기
+    client_id = st.secrets.get("NAVER_CLIENT_ID")
+    client_secret = st.secrets.get("NAVER_CLIENT_SECRET")
+
+    if not client_id or not client_secret:
+        return None, "Streamlit Secrets에 NAVER API 키 설정이 필요합니다."
+
     try:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            },
+        # 네이버 커머스 API 토큰 발급
+        token_url = "https://api.commerce.naver.com/external/v1/oauth2/token"
+        token_data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "grant_type": "client_credentials",
+            "type": "SELF",
+        }
+        token_res = requests.post(token_url, data=token_data, timeout=3)
+        access_token = token_res.json().get("access_token")
+
+        if not access_token:
+            return None, "네이버 API 인증 토큰 발급 실패"
+
+        # 상품 상세 정보 조회 API 호출
+        api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
+        headers = {"Authorization": f"Bearer {access_token}"}
+        res = requests.get(api_url, headers=headers, timeout=3)
+        data = res.json()
+
+        # 실시간 할인가(또는 기본가) 추출
+        sale_price = (
+            data.get("originProduct", {})
+            .get("detailAttribute", {})
+            .get("optionInfo", {})
+            .get("optionPrice", 0)
         )
-        with urllib.request.urlopen(req, timeout=3) as response:
-            html = response.read().decode("utf-8", errors="ignore")
+        discount_price = data.get("originProduct", {}).get("salePrice", 0)
 
-            # 1) meta tag (og:price:amount) 추출
-            og_price = re.findall(
-                r'property=["\']og:price:amount["\']\s+content=["\'](\d+)["\']',
-                html,
-            )
-            if og_price:
-                return int(og_price[0])
+        final_price = discount_price if discount_price > 0 else sale_price
 
-            # 2) JSON-LD 또는 price/discountedPrice 추출
-            price_match = re.findall(
-                r'["\']discountedPrice["\']\s*:\s*(\d+)', html
-            )
-            if price_match:
-                return int(price_match[0])
+        if final_price > 0:
+            return final_price, "성공"
+        else:
+            return None, "가격 정보 없음"
 
-            price_match2 = re.findall(r'["\']price["\']\s*:\s*(\d+)', html)
-            if price_match2:
-                return int(price_match2[0])
-    except Exception:
-        pass
-    return None
+    except Exception as e:
+        return None, f"API 접속 오류: {str(e)}"
 
 
 # ------------------------------------------------------------------
@@ -98,6 +121,7 @@ st.subheader("1. 상품 검색 및 선택")
 selected_product_name = ""
 yuan_price = 0.0
 smartstore_url = ""
+db_selling_price = 0
 
 if db is not None:
     st.success(f"✅ 전산 DB 로드 성공! (총 {len(db):,}개 상품 데이터)")
@@ -122,7 +146,6 @@ if db is not None:
         count = len(filtered_db)
 
         if count == 1:
-            # ⚡ 1건일 경우 드롭박스 없이 즉시 자동 선택!
             row = filtered_db.iloc[0]
             selected_product_name = str(row.get("상품명", ""))
 
@@ -133,6 +156,13 @@ if db is not None:
             except Exception:
                 yuan_price = 0.0
 
+            try:
+                db_selling_price = int(row.get("판매가", 0))
+                if math.isnan(db_selling_price):
+                    db_selling_price = 0
+            except Exception:
+                db_selling_price = 0
+
             smartstore_url = str(
                 row.get("스마트스토어링크", row.get("상품설명2", "")) or ""
             )
@@ -142,7 +172,6 @@ if db is not None:
             st.success(f"⚡ 1건 매칭되어 자동 선택됨: **{selected_product_name}**")
 
         elif count > 1:
-            # 🎯 2건 이상일 경우만 드롭다운 노출
             options = ["-- 아래 목록에서 상품 선택 --"] + filtered_db[
                 "상품명"
             ].tolist()
@@ -160,6 +189,13 @@ if db is not None:
                         yuan_price = 0.0
                 except Exception:
                     yuan_price = 0.0
+
+                try:
+                    db_selling_price = int(row.get("판매가", 0))
+                    if math.isnan(db_selling_price):
+                        db_selling_price = 0
+                except Exception:
+                    db_selling_price = 0
 
                 smartstore_url = str(
                     row.get("스마트스토어링크", row.get("상품설명2", "")) or ""
@@ -206,8 +242,11 @@ with col2:
         placeholder="https://smartstore.naver.com/...",
     )
 
+    if input_url.strip():
+        st.link_button("🔗 스마트스토어 상품페이지 직접 열기", input_url.strip())
+
 # ------------------------------------------------------------------
-# 5. 마켓별 판매가 자동 계산 및 크롤링 판매가 출력
+# 5. 마켓별 판매가 자동 계산 및 API 실시간 판매가 출력
 # ------------------------------------------------------------------
 if input_yuan > 0:
 
@@ -229,13 +268,18 @@ if input_yuan > 0:
 
     b5_12 = roundup_100(b5_recommend * 1.2)
 
-    # 실제 스마트스토어 링크 페이지에서 가격 크롤링
-    real_price = fetch_smartstore_real_price(input_url)
-    real_price_str = f"{real_price:,}원" if real_price else "불러오기 실패/링크없음"
+    # 네이버 커머스 API 실시간 가격 조회
+    api_price, api_msg = fetch_naver_api_price(input_url)
 
-    # 추천소비자가 바로 위에 '네이버 스마트스토어 실제 판매가' 배치
+    if api_price:
+        smartstore_display_price = f"{api_price:,}원 (네이버 공식 API)"
+    elif db_selling_price > 0:
+        smartstore_display_price = f"{db_selling_price:,}원 (전산등록가)"
+    else:
+        smartstore_display_price = f"조회 불가능 ({api_msg})"
+
     prices = {
-        "🏷️ 네이버 스마트스토어 실제 판매가 (크롤링)": real_price_str,
+        "🏷️ 현재 스마트스토어 실시간 판매가": smartstore_display_price,
         "추천 소비자가": b4_consumer,
         "추천 판매가 (기준가)": b5_recommend,
         "--- 도매 마켓 그룹 ---": "",
