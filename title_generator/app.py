@@ -457,13 +457,33 @@ def upload_to_esm_via_selenium(image_bytes, filename, folder="wholesale"):
         options.add_argument("--disable-gpu")
         options.add_argument("--window-size=1920,1080")
 
-        chromium_path = shutil.which("chromium") or shutil.which(
-            "chromium-browser"
-        )
+        chromium_candidates = [
+            shutil.which("chromium"),
+            shutil.which("chromium-browser"),
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+        ]
+        chromium_path = next((p for p in chromium_candidates if p and os.path.exists(p)), None)
         if chromium_path:
             options.binary_location = chromium_path
 
-        chromedriver_path = shutil.which("chromedriver")
+        chromedriver_candidates = [
+            shutil.which("chromedriver"),
+            "/usr/bin/chromedriver",
+            "/usr/lib/chromium/chromedriver",
+            "/usr/lib/chromium-browser/chromedriver",
+        ]
+        chromedriver_path = next(
+            (p for p in chromedriver_candidates if p and os.path.exists(p)), None
+        )
+
+        if not chromedriver_path:
+            return None, (
+                "chromedriver를 서버에서 찾지 못했습니다 (packages.txt의 "
+                "chromium-driver 설치가 안 됐거나 경로가 다를 수 있습니다). "
+                f"확인한 경로: {chromium_candidates + chromedriver_candidates}"
+            ), None
+
         service = Service(executable_path=chromedriver_path)
 
         driver = webdriver.Chrome(options=options, service=service)
