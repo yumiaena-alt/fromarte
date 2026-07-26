@@ -106,7 +106,7 @@ def fetch_naver_related_keywords(seed_keyword):
     customer_id = (
         st.secrets.get("NAVER_AD_CUSTOMER_ID")
         or os.environ.get("NAVER_AD_CUSTOMER_ID")
-        or "2560350"
+        or "4454771"
     )
 
     if not api_key or not secret_key:
