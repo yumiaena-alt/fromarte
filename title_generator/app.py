@@ -704,10 +704,16 @@ def check_prohibited_terms(text):
     return findings
 
 # ------------------------------------------------------------------
-# 상단 탭 분리 (1. Title Generator / 2. 마켓별 판매가 계산기 / 3. 상세페이지 합치기)
+# 상단 탭 분리 (1. Title Generator / 2. 마켓별 판매가 계산기 / 3. 상세페이지 합치기
+# / 4. 도매마켓 바로가기)
 # ------------------------------------------------------------------
-tab1, tab2, tab3 = st.tabs(
-    ["🏷️ 상품명 작성기", "💰 마켓별 판매가 계산기", "🖼️ 상세페이지 합치기"]
+tab1, tab2, tab3, tab4 = st.tabs(
+    [
+        "🏷️ 상품명 작성기",
+        "💰 마켓별 판매가 계산기",
+        "🖼️ 상세페이지 합치기",
+        "🔗 도매마켓 바로가기",
+    ]
 )
 
 # ==================================================================
@@ -1646,3 +1652,29 @@ with tab3:
                 key="detail_download_btn_bottom",
                 use_container_width=True,
             )
+
+# ==================================================================
+# TAB 4: 도매마켓 바로가기
+# ==================================================================
+with tab4:
+    st.subheader("🔗 도매마켓 사이트 바로가기")
+    st.caption("클릭하면 새 탭에서 해당 사이트가 열립니다.")
+
+    WHOLESALE_SITES = [
+        ("오너클랜 공급사", "https://ownerclan.com/vender/"),
+        ("도매매", "https://www.domeggook.com/sc/"),
+        ("셀링콕", "https://www.sellingkok.com/"),
+        ("도매창고", "https://www.wholesaledepot.co.kr/join"),
+        (
+            "도매의신",
+            "https://www.domesin.com/index.html?p=member/regist_agreement.html",
+        ),
+        (
+            "K셀러",
+            "https://www.kseller.kr/index.php?vhtml=mb/regist_agreement.php",
+        ),
+        ("투비즈온", "http://www.tobizon.co.kr/mall/member/agreement.php"),
+    ]
+
+    for name, url in WHOLESALE_SITES:
+        st.link_button(f"🔗 {name}", url, use_container_width=True)
