@@ -94,6 +94,13 @@ def _to_search_count(value):
     return int(digits) if digits else 0
 
 
+def _to_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 @st.cache_data(ttl=600)
 def fetch_naver_related_keywords(seed_keyword):
     """네이버 검색광고 Open API로 연관키워드 + 월간검색수를 조회."""
@@ -160,13 +167,108 @@ def fetch_naver_related_keywords(seed_keyword):
         kw = str(item.get("relKeyword", "")).strip()
         if not kw:
             continue
-        mobile_cnt = _to_search_count(item.get("monthlyMobileQcCnt", 0))
-        pc_cnt = _to_search_count(item.get("monthlyPcQcCnt", 0))
-        results.append((kw, mobile_cnt, pc_cnt))
+        results.append(
+            {
+                "키워드": kw,
+                "PC 검색수": _to_search_count(item.get("monthlyPcQcCnt", 0)),
+                "모바일 검색수": _to_search_count(
+                    item.get("monthlyMobileQcCnt", 0)
+                ),
+                "PC 클릭수": _to_float(item.get("monthlyAvePcClkCnt", 0)),
+                "모바일 클릭수": _to_float(
+                    item.get("monthlyAveMobileClkCnt", 0)
+                ),
+                "PC 클릭률(%)": _to_float(item.get("monthlyAvePcCtr", 0)),
+                "모바일 클릭률(%)": _to_float(
+                    item.get("monthlyAveMobileCtr", 0)
+                ),
+                "경쟁정도": str(item.get("compIdx", "")),
+                "노출 광고수": _to_search_count(item.get("plAvgDepth", 0)),
+            }
+        )
 
-    # 모바일 노출 많은 순 정렬 (사용자가 기존에 수기로 하던 정렬 기준과 동일)
-    results.sort(key=lambda x: x[1], reverse=True)
+    # 모바일 검색수 많은 순 정렬 (사용자가 기존에 수기로 하던 정렬 기준과 동일)
+    results.sort(key=lambda r: r["모바일 검색수"], reverse=True)
     return results, None
+
+
+def render_keyword_selection_table(kw_results, page_size=10):
+    """네이버 키워드 도구 화면처럼 표 + 페이지네이션으로 키워드를 선택하게 하고,
+    선택된 키워드 리스트를 반환한다."""
+    if "tg_kw_selected" not in st.session_state:
+        st.session_state["tg_kw_selected"] = {}
+    selected_map = st.session_state["tg_kw_selected"]
+
+    total = len(kw_results)
+    total_pages = max(1, math.ceil(total / page_size))
+    page = min(max(st.session_state.get("tg_kw_page", 1), 1), total_pages)
+    st.session_state["tg_kw_page"] = page
+
+    start = (page - 1) * page_size
+    page_rows = kw_results[start : start + page_size]
+
+    table_rows = [
+        {
+            "추가": selected_map.get(row["키워드"], False),
+            "연관키워드": row["키워드"],
+            "PC 검색수": row["PC 검색수"],
+            "모바일 검색수": row["모바일 검색수"],
+            "PC 클릭수": row["PC 클릭수"],
+            "모바일 클릭수": row["모바일 클릭수"],
+            "PC 클릭률(%)": row["PC 클릭률(%)"],
+            "모바일 클릭률(%)": row["모바일 클릭률(%)"],
+            "경쟁정도": row["경쟁정도"],
+            "노출 광고수": row["노출 광고수"],
+        }
+        for row in page_rows
+    ]
+    df = pd.DataFrame(table_rows)
+
+    edited = st.data_editor(
+        df,
+        hide_index=True,
+        use_container_width=True,
+        disabled=[c for c in df.columns if c != "추가"],
+        column_config={
+            "추가": st.column_config.CheckboxColumn("추가", width="small"),
+            "PC 검색수": st.column_config.NumberColumn(format="%d"),
+            "모바일 검색수": st.column_config.NumberColumn(format="%d"),
+            "PC 클릭수": st.column_config.NumberColumn(format="%.1f"),
+            "모바일 클릭수": st.column_config.NumberColumn(format="%.1f"),
+            "PC 클릭률(%)": st.column_config.NumberColumn(format="%.2f"),
+            "모바일 클릭률(%)": st.column_config.NumberColumn(format="%.2f"),
+            "노출 광고수": st.column_config.NumberColumn(format="%d"),
+        },
+        key=f"tg_kw_editor_{page}",
+    )
+
+    for _, r in edited.iterrows():
+        selected_map[r["연관키워드"]] = bool(r["추가"])
+
+    nav1, nav2, nav3 = st.columns([1, 2, 1])
+    with nav1:
+        if st.button("◀ 이전", disabled=(page <= 1), key="tg_kw_prev"):
+            st.session_state["tg_kw_page"] = page - 1
+            st.rerun()
+    with nav2:
+        st.markdown(
+            f"<div style='text-align:center'>{page} / {total_pages} 페이지 "
+            f"(총 {total}개)</div>",
+            unsafe_allow_html=True,
+        )
+    with nav3:
+        if st.button(
+            "다음 ▶", disabled=(page >= total_pages), key="tg_kw_next"
+        ):
+            st.session_state["tg_kw_page"] = page + 1
+            st.rerun()
+
+    selected_keywords = [kw for kw, checked in selected_map.items() if checked]
+    st.caption(f"✅ 선택된 키워드: {len(selected_keywords)}개")
+    if selected_keywords:
+        st.caption(", ".join(selected_keywords))
+
+    return selected_keywords
 
 
 @st.cache_data(ttl=5)
@@ -225,6 +327,12 @@ with tab1:
         placeholder="예: 차량용 무선 선풍기",
         key="tg_product_type",
     )
+
+    # 상품 종류가 바뀌면 핵심 키워드 입력창에 자동 반영 (이후 직접 수정 가능)
+    if st.session_state.get("_tg_last_product_type") != product_type:
+        st.session_state["_tg_last_product_type"] = product_type
+        st.session_state["tg_seed_keyword"] = product_type
+
     product_features = st.text_input(
         "주요 특징/소재",
         placeholder="예: USB 충전, 무소음, 3단계 풍속조절",
@@ -245,7 +353,7 @@ with tab1:
         key="tg_kw_input_method",
     )
 
-    parsed_keywords = []
+    valid_keywords = []
 
     if kw_input_method == "🔍 네이버 API로 자동 조회 (추천)":
         seed_col1, seed_col2 = st.columns([3, 1])
@@ -273,6 +381,8 @@ with tab1:
                 else:
                     st.session_state["tg_kw_results"] = results
                     st.session_state["tg_kw_seed"] = seed_keyword.strip()
+                    st.session_state["tg_kw_page"] = 1
+                    st.session_state["tg_kw_selected"] = {}
 
         kw_results = st.session_state.get("tg_kw_results")
         if kw_results:
@@ -280,7 +390,7 @@ with tab1:
                 f"'{st.session_state.get('tg_kw_seed', '')}' 연관 키워드 "
                 f"{len(kw_results)}개 (모바일 검색량 많은 순 정렬)"
             )
-            parsed_keywords = [(kw, mobile_cnt) for kw, mobile_cnt, pc_cnt in kw_results]
+            valid_keywords = render_keyword_selection_table(kw_results)
     else:
         raw_keywords_text = st.text_area(
             "네이버 광고주 센터에서 추출한 키워드 및 검색량 목록을 붙여넣으세요:",
@@ -289,6 +399,7 @@ with tab1:
             key="tg_raw_keywords",
         )
 
+        parsed_keywords = []
         if raw_keywords_text.strip():
             lines = raw_keywords_text.strip().split("\n")
             for line in lines:
@@ -302,31 +413,29 @@ with tab1:
                     )
                     parsed_keywords.append((kw, count))
 
-    valid_keywords = []
+        if parsed_keywords:
+            parsed_keywords.sort(key=lambda x: x[1], reverse=True)
 
-    if parsed_keywords:
-        parsed_keywords.sort(key=lambda x: x[1], reverse=True)
-
-        st.markdown("#### 🖐️ [휴먼 터치] 필요한 키워드만 체크해서 추가")
-        st.caption(
-            "실제 검색량이 높은 순서대로 정렬되었습니다. **내 상품과 맞는 키워드만 체크**하세요!"
-        )
-
-        cols = st.columns(4)
-        selected_kw_list = []
-
-        for idx, (kw, count) in enumerate(parsed_keywords):
-            col_idx = idx % 4
-            display_label = f"{kw} ({count:,})" if count > 0 else kw
-            is_checked = cols[col_idx].checkbox(
-                display_label, value=False, key=f"tg_kw_{idx}"
+            st.markdown("#### 🖐️ [휴먼 터치] 필요한 키워드만 체크해서 추가")
+            st.caption(
+                "실제 검색량이 높은 순서대로 정렬되었습니다. **내 상품과 맞는 키워드만 체크**하세요!"
             )
-            if is_checked:
-                selected_kw_list.append(kw)
 
-        st.caption(f"✅ 선택된 키워드: {len(selected_kw_list)}개")
+            cols = st.columns(4)
+            selected_kw_list = []
 
-        valid_keywords = selected_kw_list
+            for idx, (kw, count) in enumerate(parsed_keywords):
+                col_idx = idx % 4
+                display_label = f"{kw} ({count:,})" if count > 0 else kw
+                is_checked = cols[col_idx].checkbox(
+                    display_label, value=False, key=f"tg_kw_{idx}"
+                )
+                if is_checked:
+                    selected_kw_list.append(kw)
+
+            st.caption(f"✅ 선택된 키워드: {len(selected_kw_list)}개")
+
+            valid_keywords = selected_kw_list
 
     if st.button(
         "🚀 100byte 최적화 상품명 생성하기", type="primary", key="tg_generate_btn"
