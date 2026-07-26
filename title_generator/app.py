@@ -254,7 +254,7 @@ def _get_korean_font(size):
     return ImageFont.load_default()
 
 
-def _wrap_text_lines(draw, text, font, max_width, max_chars=40):
+def _wrap_text_lines(draw, text, font, max_width, max_chars=20):
     lines = []
     for paragraph in text.split("\n"):
         if not paragraph.strip():
