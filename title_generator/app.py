@@ -381,8 +381,6 @@ with tab2:
     gemini_api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
         "GEMINI_API_KEY"
     )
-    if gemini_api_key:
-        genai.configure(api_key=gemini_api_key)
 
     st.subheader("🏷️ SEO 키워드 기반 최적화 상품명 생성기")
     st.caption(
@@ -458,16 +456,39 @@ with tab2:
     if st.button(
         "🚀 100byte 최적화 상품명 생성하기", type="primary", key="tg_generate_btn"
     ):
-        if not product_type:
+        if not gemini_api_key:
+            st.error("⚠️ GEMINI_API_KEY가 등록되지 않았습니다. Streamlit Secrets 설정을 확인해주세요.")
+        elif not product_type:
             st.warning("⚠️ '상품 종류/기본명'을 입력해주세요.")
         elif not valid_keywords:
             st.warning(
                 "⚠️ 선택된 키워드가 없습니다. 네이버 키워드를 입력하고 체크해주세요."
             )
         else:
-            with st.spinner(
-                "AI가 실제 검색량 순위와 100byte 기준을 맞춰 상품명을 생성 중입니다..."
-            ):
+            with st.spinner("AI가 사용 가능한 모델을 탐색하여 상품명을 생성 중입니다..."):
+                genai.configure(api_key=gemini_api_key)
+
+                # 💡 사용 가능한 모델을 동적으로 자동 탐색하는 스마트 로직
+                def get_working_model():
+                    candidates = [
+                        "gemini-1.5-flash-latest",
+                        "gemini-1.5-flash",
+                        "gemini-pro",
+                        "gemini-1.0-pro",
+                    ]
+                    
+                    try:
+                        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                        for c in candidates:
+                            for m in available_models:
+                                if c in m:
+                                    return genai.GenerativeModel(m)
+                    except Exception:
+                        pass
+                    
+                    # 폴백(기본값)
+                    return genai.GenerativeModel("gemini-1.5-flash")
+
                 prompt = f"""
 너는 한국 이커머스(네이버 스마트스토어, 쿠팡 등) SEO 전문가야.
 직원이 선별한 '실제 검색량이 높은 키워드 순서'를 최우선으로 반영하여 최적의 상품명을 만들어줘.
@@ -492,8 +513,7 @@ with tab2:
 """
 
                 try:
-                    # 💡 무료 플랜 지원이 가장 안정적인 gemini-1.5-flash 표준 모델 적용
-                    model = genai.GenerativeModel("gemini-1.5-flash")
+                    model = get_working_model()
                     response = model.generate_content(prompt)
 
                     st.success("✅ SEO 상품명 생성 완료!")
