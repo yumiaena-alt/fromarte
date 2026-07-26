@@ -302,9 +302,9 @@ with tab1:
     if parsed_keywords:
         parsed_keywords.sort(key=lambda x: x[1], reverse=True)
 
-        st.markdown("#### 🖐️ [휴먼 터치] 연관 없는 키워드 체크 해제")
+        st.markdown("#### 🖐️ [휴먼 터치] 필요한 키워드만 체크해서 추가")
         st.caption(
-            "실제 검색량이 높은 순서대로 정렬되었습니다. **내 상품과 맞지 않는 단어만 체크 해제**하세요!"
+            "실제 검색량이 높은 순서대로 정렬되었습니다. **내 상품과 맞는 키워드만 체크**하세요!"
         )
 
         cols = st.columns(4)
@@ -314,10 +314,12 @@ with tab1:
             col_idx = idx % 4
             display_label = f"{kw} ({count:,})" if count > 0 else kw
             is_checked = cols[col_idx].checkbox(
-                display_label, value=True, key=f"tg_kw_{idx}"
+                display_label, value=False, key=f"tg_kw_{idx}"
             )
             if is_checked:
                 selected_kw_list.append(kw)
+
+        st.caption(f"✅ 선택된 키워드: {len(selected_kw_list)}개")
 
         valid_keywords = selected_kw_list
 
