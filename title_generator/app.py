@@ -8,13 +8,16 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Title Generator & Price Calculator",
-    page_icon="💰",
+    page_icon="🏷️",
     layout="centered",
 )
 
-st.title("💰 마켓별 판매가 자동 계산기")
+# ------------------------------------------------------------------
+# 메인 타이틀 & 설명 (Title Generator 기준)
+# ------------------------------------------------------------------
+st.title("🏷️ Title Generator & Price Calculator")
 st.write(
-    "전산 상품을 검색하거나 매입위안/스마트스토어 판매가를 입력하여 맞춤형 판매가를 산출하세요."
+    "네이버 SEO 기반 최적화 상품명 생성과 마켓별 판매가 산출을 한곳에서 처리하세요."
 )
 
 # ------------------------------------------------------------------
@@ -80,6 +83,8 @@ def fetch_naver_api_price(smartstore_url):
 @st.cache_data(ttl=5)
 def load_master_db():
     possible_paths = [
+        "title_generator/master_db.xlsx",
+        "title_generator/전체상품목록_20260725210142_6999190.xlsx",
         "price_calculator/master_db.xlsx",
         "price_calculator/전체상품목록_20260725210142_6999190.xlsx",
         "master_db.xlsx",
@@ -95,21 +100,22 @@ def load_master_db():
                 return None, f"파일 읽기 실패: {str(e)}"
 
     folder_files = []
-    if os.path.exists("price_calculator"):
-        folder_files = os.listdir("price_calculator")
+    if os.path.exists("title_generator"):
+        folder_files = os.listdir("title_generator")
 
     return (
         None,
-        f"파일 없음 (price_calculator 폴더 안 파일 목록: {folder_files})",
+        f"파일 없음 (title_generator 폴더 안 파일 목록: {folder_files})",
     )
 
 
 db, status_msg = load_master_db()
 
 # ------------------------------------------------------------------
-# 3. 상품 부분 검색 및 자동 선택
+# 3. 상품 부분 검색 및 데이터 자동 선택
 # ------------------------------------------------------------------
-st.subheader("1. 상품 검색 및 데이터 선택")
+st.markdown("---")
+st.subheader("1. 전산 상품 검색 & 기본 정보")
 
 selected_product_name = ""
 yuan_price = 0.0
@@ -262,7 +268,7 @@ with col_ss1:
     st.caption(price_source_badge)
 
 # ------------------------------------------------------------------
-# 5. 스마트스토어 판매가 비교 및 재계산 로직
+# 5. 마켓별 산출 판매가 목록
 # ------------------------------------------------------------------
 if input_yuan > 0:
 
@@ -361,7 +367,7 @@ else:
     )
 
 # ------------------------------------------------------------------
-# 6. Title Generator (SEO 키워드 기반 상품명 생성기)
+# 6. Title Generator (SEO 키워드 기반 최적화 상품명 생성기)
 # ------------------------------------------------------------------
 gemini_api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
     "GEMINI_API_KEY"
@@ -370,7 +376,7 @@ if gemini_api_key:
     genai.configure(api_key=gemini_api_key)
 
 st.markdown("---")
-st.subheader("🏷️ Title Generator")
+st.subheader("🚀 3. Title Generator (SEO 최적화 상품명 생성)")
 
 col_info1, col_info2 = st.columns(2)
 with col_info1:
