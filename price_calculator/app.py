@@ -202,7 +202,7 @@ else:
 st.markdown("---")
 
 # ------------------------------------------------------------------
-# 4. 상세 정보 입력 및 스마트스토어 판매가 설정
+# 4. 상세 정보 입력 및 출처 표기 기능
 # ------------------------------------------------------------------
 col1, col2 = st.columns(2)
 
@@ -235,14 +235,19 @@ with col2:
     if input_url.strip():
         st.link_button("🔗 스마트스토어 상품페이지 직접 열기", input_url.strip())
 
-# 스마트스토어 실시간 API 또는 전산 등록가 자동 추출
+# 스마트스토어 실시간 API 또는 전산 등록가 자동 추출 및 출처 판단
 api_fetched_price = fetch_naver_api_price(input_url)
 default_ss_price = 0
+price_source_badge = ""
 
 if api_fetched_price:
     default_ss_price = api_fetched_price
+    price_source_badge = "🟢 **네이버 공식 API**로 불러온 실시간 판매가입니다."
 elif db_selling_price > 0:
     default_ss_price = db_selling_price
+    price_source_badge = "🔵 **전산 DB 엑셀**에 등록되어 있던 판매가입니다."
+else:
+    price_source_badge = "⚪ 등록된 가격이 없어 0원으로 표시됩니다. (직접 입력 가능)"
 
 col_ss1, col_ss2 = st.columns([2, 1])
 with col_ss1:
@@ -252,6 +257,8 @@ with col_ss1:
         step=100,
         help="주소를 통해 자동 수집된 가격이 있거나 직접 변경할 금액을 입력하세요.",
     )
+    # 📌 금액 출처 표기 (API vs 전산 DB vs 미등록)
+    st.caption(price_source_badge)
 
 # ------------------------------------------------------------------
 # 5. 스마트스토어 판매가 비교 및 재계산 로직
