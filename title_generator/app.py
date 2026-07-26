@@ -491,30 +491,54 @@ with tab2:
 7. 가장 아래에는 활용된 키워드 20개를 검색량 높은 순서대로 쉼표(,)로 구분하여 한 줄로 적어줘.
 """
 
-                # 💡 무료 플랜에서 지원되는 Flash 모델들만 순차 시도 (Pro 모델 배제)
-                flash_models = [
-                    "gemini-1.5-flash",
-                    "gemini-1.5-flash-8b",
-                    "gemini-2.0-flash-exp",
-                    "models/gemini-1.5-flash",
-                ]
+                @st.cache_data(ttl=3600)
+                def get_available_flash_models(_has_key):
+                    """generateContent를 지원하는 모델을 실제로 조회 (하드코딩 대신)."""
+                    try:
+                        all_models = list(genai.list_models())
+                    except Exception:
+                        return []
+
+                    supported = [
+                        m.name
+                        for m in all_models
+                        if "generateContent"
+                        in getattr(m, "supported_generation_methods", [])
+                    ]
+
+                    # flash 계열(저비용/무료 티어)을 우선순위로 정렬
+                    return sorted(
+                        supported,
+                        key=lambda name: (0 if "flash" in name.lower() else 1, name),
+                    )
+
+                candidate_models = get_available_flash_models(bool(gemini_api_key))
 
                 response_text = None
                 last_error = None
 
-                for model_name in flash_models:
-                    try:
-                        model = genai.GenerativeModel(model_name)
-                        res = model.generate_content(prompt)
-                        if res and res.text:
-                            response_text = res.text
-                            break
-                    except Exception as err:
-                        last_error = err
-                        continue
+                if not candidate_models:
+                    last_error = (
+                        "사용 가능한 Gemini 모델을 조회하지 못했습니다. "
+                        "API 키 권한 또는 프로젝트 설정을 확인해주세요."
+                    )
+                else:
+                    for model_name in candidate_models:
+                        try:
+                            model = genai.GenerativeModel(model_name)
+                            res = model.generate_content(prompt)
+                            if res and res.text:
+                                response_text = res.text
+                                break
+                        except Exception as err:
+                            last_error = f"[{model_name}] {err}"
+                            continue
 
                 if response_text:
                     st.success("✅ SEO 상품명 생성 완료!")
                     st.markdown(response_text)
                 else:
                     st.error(f"AI 생성 중 오류가 발생했습니다: {str(last_error)}")
+                    if candidate_models:
+                        with st.expander("조회된 사용 가능 모델 목록 보기"):
+                            st.write(candidate_models)
