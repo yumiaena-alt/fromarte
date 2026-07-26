@@ -1,6 +1,9 @@
+import base64
 import math
 import os
 import re
+import time
+import bcrypt
 import pandas as pd
 import requests
 import streamlit as st
@@ -15,23 +18,16 @@ st.write(
 )
 
 # ------------------------------------------------------------------
-# 1. 네이버 커머스 API 연동 함수 (실시간 공식 판매가)
+# 1. 네이버 커머스 API 연동 함수 (공식 bcrypt 서명 방식)
 # ------------------------------------------------------------------
 
 
-import base64
-import hashlib
-import hmac
-import time
-import requests
-import streamlit as st
-
-
 def fetch_naver_api_price(smartstore_url):
-    """스마트스토어 URL에서 상품ID를 추출하여 네이버 Commerce API(서명 인증 방식)로 판매가를 조회합니다."""
+    """스마트스토어 URL에서 상품ID를 추출하여 네이버 Commerce API(공식 bcrypt 서명 방식)로 판매가를 조회합니다."""
     if not smartstore_url or not isinstance(smartstore_url, str):
         return None, "주소가 입력되지 않았습니다."
 
+    # URL 패턴 매칭
     match = re.search(r"products/(\d+)", smartstore_url)
     if not match:
         return (
@@ -55,19 +51,19 @@ def fetch_naver_api_price(smartstore_url):
         )
 
     try:
-        # 1. 네이버 커머스 API 서명(Signature) 및 Timestamp 생성
-        timestamp = str(int(time.time() * 1000))
+        # 1. 네이버 커머스 API 공식 Timestamp & bcrypt 서명 생성
+        # 서버 시간 차로 인한 오류 방지를 위해 3초 차감
+        timestamp = str(int((time.time() - 3) * 1000))
 
-        # client_id와 timestamp를 연동하여 암호화 서명 생성
+        # 비밀번호 생성: client_id + "_" + timestamp
         password = f"{client_id}_{timestamp}"
 
-        # bcrypt 모듈 대신 네이버 API 규격(HMAC-SHA256) 생성
-        # 비밀키(client_secret)와 암호화 대상(password)을 조합
-        hashed = hmac.new(
-            client_secret.encode("utf-8"),
-            password.encode("utf-8"),
-            hashlib.sha256,
-        ).digest()
+        # bcrypt hash 생성 (client_secret을 salt로 사용)
+        hashed = bcrypt.hashpw(
+            password.encode("utf-8"), client_secret.encode("utf-8")
+        )
+
+        # Base64 인코딩
         client_secret_sign = base64.b64encode(hashed).decode("utf-8")
 
         # 2. 토큰 발급 요청
@@ -80,7 +76,11 @@ def fetch_naver_api_price(smartstore_url):
             "type": "SELF",
         }
 
-        token_res = requests.post(token_url, data=token_data, timeout=5)
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+
+        token_res = requests.post(
+            token_url, data=token_data, headers=headers, timeout=5
+        )
 
         if token_res.status_code != 200:
             return (
@@ -94,8 +94,8 @@ def fetch_naver_api_price(smartstore_url):
 
         # 3. 상품 상세 정보 조회
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
-        headers = {"Authorization": f"Bearer {access_token}"}
-        res = requests.get(api_url, headers=headers, timeout=5)
+        auth_headers = {"Authorization": f"Bearer {access_token}"}
+        res = requests.get(api_url, headers=auth_headers, timeout=5)
 
         if res.status_code != 200:
             return (
@@ -114,6 +114,7 @@ def fetch_naver_api_price(smartstore_url):
 
     except Exception as e:
         return None, f"API 통신 오류: {str(e)}"
+
 
 # ------------------------------------------------------------------
 # 2. 전산 데이터베이스 로드
@@ -296,7 +297,7 @@ if api_fetched_price is not None:
 elif db_selling_price > 0:
     default_ss_price = db_selling_price
     price_status_type = "error"
-    # 📌 요청사항: DB 등록가는 확인용이므로 눈에 띄게 붉게 강조
+    # 📌 DB 등록가는 확인용이므로 붉은색 강한 경고 박스로 표기
     price_source_badge = f"🚨 **[주의] 네이버 API 연동 실패 ({api_msg})**\n\n이 금액은 API 실시간가가 아닌 **전산 DB 엑셀에 등록되어 있던 옛날 판매가**입니다. 실제 스마트스토어 판매가와 다를 수 있으니 반드시 확인 후 수정해 주세요!"
 else:
     price_status_type = "info"
@@ -313,7 +314,7 @@ with col_ss1:
         help="주소를 통해 자동 수집된 가격이 있거나 직접 변경할 금액을 입력하세요.",
     )
 
-    # 📌 출처 표기 시각화 (API 실패 및 DB 등록가인 경우 st.error 붉은 박스로 표시)
+    # 📌 출처 표기 시각화
     if price_status_type == "error":
         st.error(price_source_badge)
     elif price_status_type == "success":
@@ -340,10 +341,7 @@ if input_yuan > 0:
     ss_price = input_ss_price
 
     if ss_price > orig_recommend:
-        # 스마트스토어 가격이 더 높은 경우 ➔ 스마트스토어 가격을 기준가로 설정
         final_recommend = ss_price
-
-        # 추천 소비자가는 할인 표시 시 거부감이 없도록 스마트스토어 가격의 약 1.33~1.5배 설정 (100원 단위 올림)
         final_consumer = roundup_100(ss_price * 1.33)
         if final_consumer <= ss_price:
             final_consumer = roundup_100(ss_price * 1.5)
@@ -352,7 +350,6 @@ if input_yuan > 0:
         price_case_text = f"💡 **스마트스토어 판매가({ss_price:,}원)**가 원가 기준 추천가({orig_recommend:,}원)보다 높아 **스마트스토어 판매가를 기준가**로 적용하여 재산출했습니다."
 
     else:
-        # 스마트스토어 가격이 같거나 더 낮은 경우 ➔ 원래 기준가 유지
         final_recommend = orig_recommend
         final_consumer = orig_consumer
 
@@ -363,7 +360,7 @@ if input_yuan > 0:
             price_case_msg = "normal"
             price_case_text = ""
 
-    # 3) 최종 기준가(final_recommend) 바탕으로 각 마켓 가격 계산
+    # 3) 최종 기준가 바탕 마켓별 산출
     b5_09 = roundup_100(final_recommend * 0.9)
     b11_dome_shin = roundup_100(b5_09 * 0.95)
 
@@ -401,7 +398,6 @@ if input_yuan > 0:
     st.markdown("---")
     st.subheader("2. 마켓별 산출 판매가 목록")
 
-    # 원가 및 상태 안내 메시지 출력
     st.info(
         f"💡 **원가 정보:** 매입가 ¥{input_yuan:,} ➔ 원가(VAT포함) {int(b2_cost_vat):,}원 | **원가 기준 기본 추천가:** {orig_recommend:,}원"
     )
