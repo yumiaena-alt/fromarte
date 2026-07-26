@@ -207,19 +207,19 @@ with tab1:
 
     product_type = st.text_input(
         "상품 종류/기본명",
-        placeholder="예: 어린이 자전거 바구니",
+        placeholder="예: 차량용 무선 선풍기",
         key="tg_product_type",
-    )
-    brand_name = st.text_input(
-        "브랜드명", value="프롬아떼", key="tg_brand_name"
     )
     product_features = st.text_input(
         "주요 특징/소재",
-        placeholder="예: 플라스틱, 자체디자인, 킥보드겸용",
+        placeholder="예: USB 충전, 무소음, 3단계 풍속조절",
         key="tg_product_features",
     )
     product_target = st.text_input(
-        "타겟/용도", placeholder="예: 어린이, 유아", key="tg_product_target"
+        "타겟/용도", placeholder="예: 캠핑, 차량용", key="tg_product_target"
+    )
+    brand_name = st.text_input(
+        "브랜드명", value="프롬아떼", key="tg_brand_name"
     )
 
     st.markdown("#### 📥 연관 키워드 가져오기")
@@ -269,7 +269,7 @@ with tab1:
     else:
         raw_keywords_text = st.text_area(
             "네이버 광고주 센터에서 추출한 키워드 및 검색량 목록을 붙여넣으세요:",
-            placeholder="예시 (키워드 / 월간검색량 순으로 붙여넣기):\n자전거바구니 15000\n어린이자전거바구니 8200\n킥보드바구니 3100\n유아바구니 1200",
+            placeholder="예시 (키워드 / 월간검색량 순으로 붙여넣기):\n무선선풍기 15000\n차량용선풍기 8200\nUSB선풍기 3100\n미니선풍기 1200",
             height=120,
             key="tg_raw_keywords",
         )
