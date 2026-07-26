@@ -82,24 +82,43 @@ def _get_naver_commerce_token():
 
 
 @st.cache_data(ttl=60)
+def _product_has_option_price(origin_product):
+    """옵션(단독형/조합형)에 추가금액이 붙어있는 상품인지 확인한다."""
+    option_info = (
+        (origin_product.get("detailAttribute", {}) or {}).get("optionInfo", {})
+        or {}
+    )
+    rows = list(option_info.get("optionCombinations") or []) + list(
+        option_info.get("optionStandards") or []
+    )
+    for row in rows:
+        try:
+            if float(row.get("price", 0) or 0) != 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
 def fetch_naver_api_price(smartstore_url):
     if not smartstore_url:
-        return None, None
+        return None, None, False
     if "smartstore.naver.com" not in smartstore_url:
         return (
             None,
             "smartstore.naver.com 형식의 링크가 아닙니다. (단축링크(naver.me 등)는 지원하지 않으니 상품 상세페이지의 전체 주소를 붙여넣어 주세요)",
+            False,
         )
 
     match = re.search(r"products/(\d+)", smartstore_url)
     if not match:
-        return None, "URL에서 상품 번호(products/숫자)를 찾지 못했습니다."
+        return None, "URL에서 상품 번호(products/숫자)를 찾지 못했습니다.", False
 
     product_id = match.group(1)
 
     access_token, err = _get_naver_commerce_token()
     if err:
-        return None, f"네이버 API 인증 실패: {err}"
+        return None, f"네이버 API 인증 실패: {err}", False
 
     try:
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
@@ -108,14 +127,15 @@ def fetch_naver_api_price(smartstore_url):
         res.raise_for_status()
         data = res.json()
     except Exception as e:
-        return None, f"네이버 상품 조회 실패: {e}"
+        return None, f"네이버 상품 조회 실패: {e}", False
 
     origin_product = data.get("originProduct", {}) or {}
     discount_price = origin_product.get("salePrice", 0)
+    has_option_price = _product_has_option_price(origin_product)
 
     if discount_price and discount_price > 0:
-        return int(discount_price), None
-    return None, "네이버 API 응답에 판매가 정보가 없습니다."
+        return int(discount_price), None, has_option_price
+    return None, "네이버 API 응답에 판매가 정보가 없습니다.", has_option_price
 
 
 def _parse_text_align(raw_html):
@@ -1178,7 +1198,9 @@ with tab2:
                 "🔗 스마트스토어 상품페이지 직접 열기", input_url.strip()
             )
 
-    api_fetched_price, api_price_err = fetch_naver_api_price(input_url)
+    api_fetched_price, api_price_err, api_has_option_price = fetch_naver_api_price(
+        input_url
+    )
     default_ss_price = 0
     price_source_badge = ""
 
@@ -1187,6 +1209,8 @@ with tab2:
         price_source_badge = (
             "🟢 **네이버 공식 API**로 불러온 실시간 판매가입니다."
         )
+        if api_has_option_price:
+            price_source_badge += " (기본가 기준 — 옵션가가 있는 상품입니다)"
     elif db_selling_price > 0:
         default_ss_price = db_selling_price
         price_source_badge = (
@@ -1264,15 +1288,15 @@ with tab2:
             "추천 판매가 (기준가)": final_recommend,
             "--- 도매 마켓 그룹 ---": "",
             "오너클랜": b5_09,
-            "지마켓 / 옥션": final_recommend,
-            "쿠팡": final_recommend,
-            "K셀러": b5_09,
+            "도매꾹 & 도매매": b5_09,
+            "셀링콕 등 도매마켓": b15_sellingkok,
             "도매창고": b5_09,
             "도매의신": b11_dome_shin,
-            "도매꾹 & 도매매": b5_09,
-            "펀앤쇼핑": b5_09,
+            "K셀러": b5_09,
             "투비즈온": b14_tobizon,
-            "셀링콕 등 도매마켓": b15_sellingkok,
+            "지마켓 / 옥션": final_recommend,
+            "쿠팡": final_recommend,
+            "펀앤쇼핑": b5_09,
             "온채널": b16_onchannel,
             "11번가": final_recommend,
             "네이버 스마트스토어": final_recommend,
