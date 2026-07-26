@@ -5,6 +5,8 @@ import io
 import math
 import os
 import re
+import shutil
+import tempfile
 import time
 import urllib.request
 
@@ -15,6 +17,12 @@ import requests
 import streamlit as st
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 
 st.set_page_config(
     page_title="프롬아떼 스마트 커머스 툴",
@@ -365,6 +373,126 @@ def combine_image_row(images):
         row_img.paste(img, (x, 0))
         x += img.width
     return row_img
+
+
+def upload_to_esm_via_selenium(image_bytes, filename, folder="wholesale"):
+    """Selenium으로 im.esmplus.com에 로그인해서 이미지를 업로드하고 결과 URL을 반환.
+
+    ESM+는 공식적으로 FTP/업로드 API를 제공하지 않아 실제 웹 화면을 그대로
+    자동화한다. 로그인 폼/업로드 버튼의 정확한 HTML 구조를 사전에 확인할 수
+    없었으므로 아래 선택자들은 매뉴얼 화면 설명을 바탕으로 한 최선 추정이다.
+    실패하면 (None, 에러메시지, 실패 시점 스크린샷 bytes 또는 None)을 반환한다.
+    """
+    esm_id = st.secrets.get("ESM_ID") or os.environ.get("ESM_ID")
+    esm_pw = st.secrets.get("ESM_PW") or os.environ.get("ESM_PW")
+    customer_id = (
+        st.secrets.get("ESM_CUSTOMER_ID")
+        or os.environ.get("ESM_CUSTOMER_ID")
+        or "fromarte"
+    )
+
+    if not esm_id or not esm_pw:
+        return None, "ESM_ID / ESM_PW가 Streamlit Secrets에 등록되지 않았습니다.", None
+
+    tmp_path = None
+    driver = None
+    try:
+        tmp_path = os.path.join(tempfile.gettempdir(), filename)
+        with open(tmp_path, "wb") as f:
+            f.write(image_bytes)
+
+        options = Options()
+        options.add_argument("--headless=new")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
+
+        chromium_path = shutil.which("chromium") or shutil.which(
+            "chromium-browser"
+        )
+        if chromium_path:
+            options.binary_location = chromium_path
+
+        chromedriver_path = shutil.which("chromedriver")
+        service = Service(executable_path=chromedriver_path)
+
+        driver = webdriver.Chrome(options=options, service=service)
+        wait = WebDriverWait(driver, 20)
+
+        driver.get("https://im.esmplus.com/")
+
+        id_input = wait.until(
+            EC.presence_of_element_located((By.XPATH, "//input[@type='text']"))
+        )
+        pw_input = driver.find_element(By.XPATH, "//input[@type='password']")
+        id_input.send_keys(esm_id)
+        pw_input.send_keys(esm_pw)
+
+        login_btn = driver.find_element(
+            By.XPATH,
+            "//button[contains(translate(text(),'login','LOGIN'),'LOGIN')] "
+            "| //button[contains(text(),'로그인')]",
+        )
+        login_btn.click()
+
+        wait.until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//*[contains(text(),'파일 관리') or contains(text(),'이미지호스팅')]")
+            )
+        )
+
+        try:
+            folder_link = driver.find_element(By.XPATH, f"//*[text()='{folder}']")
+            folder_link.click()
+            time.sleep(1)
+        except Exception:
+            pass
+
+        upload_menu_btn = driver.find_element(
+            By.XPATH, "//*[contains(text(),'업로드')]"
+        )
+        upload_menu_btn.click()
+        time.sleep(0.5)
+
+        try:
+            file_upload_item = driver.find_element(
+                By.XPATH, "//*[contains(text(),'파일 업로드')]"
+            )
+            file_upload_item.click()
+            time.sleep(0.5)
+        except Exception:
+            pass
+
+        file_input = driver.find_element(By.XPATH, "//input[@type='file']")
+        file_input.send_keys(tmp_path)
+        time.sleep(1)
+
+        send_btn = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//*[contains(text(),'전송시작')]"))
+        )
+        send_btn.click()
+
+        WebDriverWait(driver, 30).until(
+            EC.text_to_be_present_in_element((By.TAG_NAME, "body"), "완료")
+        )
+
+        final_url = f"https://gi.esmplus.com/{customer_id}/{folder}/{filename}"
+        return final_url, None, None
+
+    except Exception as e:
+        screenshot = None
+        if driver:
+            try:
+                screenshot = driver.get_screenshot_as_png()
+            except Exception:
+                pass
+        return None, str(e), screenshot
+    finally:
+        if driver:
+            driver.quit()
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
 
 
 def _naver_ad_signature(secret_key, timestamp, method, uri):
@@ -1547,3 +1675,49 @@ with tab3:
                     key="detail_download_btn",
                     use_container_width=True,
                 )
+
+            st.markdown("---")
+            st.markdown("#### ☁️ ESM+ 이미지호스팅 자동 업로드")
+            st.caption(
+                "ESM+는 FTP/API를 공식 지원하지 않아, 실제 웹 화면을 자동으로 "
+                "조작해 업로드합니다 (Selenium). 로그인 계정 정보가 필요하며, "
+                "사이트 화면이 바뀌면 실패할 수 있습니다 — 실패 시 화면 캡처를 "
+                "보여드리니 함께 원인을 확인하면 됩니다."
+            )
+
+            default_esm_name = re.sub(r"[^A-Za-z0-9_-]", "", source_name) or "detail"
+            esm_col1, esm_col2 = st.columns(2)
+            with esm_col1:
+                esm_filename_base = st.text_input(
+                    "업로드 파일명 (영문/숫자, 확장자 제외)",
+                    value=default_esm_name,
+                    key="esm_filename_base",
+                )
+            with esm_col2:
+                esm_folder = st.text_input(
+                    "업로드 폴더", value="wholesale", key="esm_folder"
+                )
+
+            if st.button("☁️ ESM+에 자동 업로드", key="esm_upload_btn"):
+                if not esm_filename_base.strip():
+                    st.warning("⚠️ 업로드 파일명을 입력해주세요.")
+                else:
+                    esm_filename = f"{esm_filename_base.strip()}.jpg"
+                    with st.spinner(
+                        "ESM+에 로그인하고 업로드하는 중입니다 (10~30초 소요)..."
+                    ):
+                        esm_url, esm_err, esm_shot = upload_to_esm_via_selenium(
+                            byte_im, esm_filename, esm_folder.strip() or "wholesale"
+                        )
+
+                    if esm_err:
+                        st.error(f"⚠️ ESM+ 업로드 실패: {esm_err}")
+                        if esm_shot:
+                            st.image(
+                                esm_shot,
+                                caption="실패 시점 화면 캡처 (디버깅용)",
+                            )
+                    else:
+                        st.success("✅ ESM+ 업로드 완료!")
+                        st.code(f'<img src="{esm_url}">', language=None)
+                        st.code(esm_url, language=None)
