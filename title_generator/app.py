@@ -254,7 +254,7 @@ def _get_korean_font(size):
     return ImageFont.load_default()
 
 
-def _wrap_text_lines(draw, text, font, max_width, max_chars=20):
+def _wrap_text_lines(draw, text, font, max_width, max_chars=15):
     lines = []
     for paragraph in text.split("\n"):
         if not paragraph.strip():
@@ -262,6 +262,7 @@ def _wrap_text_lines(draw, text, font, max_width, max_chars=20):
             continue
         words = paragraph.split(" ")
         current = ""
+        para_lines = []
         for word in words:
             candidate = (current + " " + word).strip()
             fits = (
@@ -271,7 +272,7 @@ def _wrap_text_lines(draw, text, font, max_width, max_chars=20):
             if not current or fits:
                 current = candidate
             else:
-                lines.append(current)
+                para_lines.append(current)
                 current = word
             while draw.textlength(current, font=font) > max_width and len(current) > 1:
                 lo, hi = 1, len(current)
@@ -281,10 +282,21 @@ def _wrap_text_lines(draw, text, font, max_width, max_chars=20):
                         lo = mid
                     else:
                         hi = mid - 1
-                lines.append(current[:lo])
+                para_lines.append(current[:lo])
                 current = current[lo:]
         if current:
-            lines.append(current)
+            para_lines.append(current)
+
+        # 한 문단이 3줄 이상으로 나뉘면 3줄마다 빈 줄을 넣어 숨 쉴 틈을 준다.
+        if len(para_lines) >= 3:
+            spaced = []
+            for i, line in enumerate(para_lines):
+                spaced.append(line)
+                if (i + 1) % 3 == 0 and i != len(para_lines) - 1:
+                    spaced.append("")
+            para_lines = spaced
+
+        lines.extend(para_lines)
     return lines
 
 
@@ -1309,7 +1321,9 @@ with tab3:
                         st.session_state["detail_active_blocks"] = None
                         st.session_state["detail_link_main_img"] = None
                     else:
-                        st.session_state["detail_active_blocks"] = built_blocks
+                        st.session_state["detail_active_blocks"] = [
+                            {"image": b, "parts": None} for b in built_blocks
+                        ]
                         if failed_count:
                             st.warning(
                                 f"⚠️ 이미지 {failed_count}개는 다운로드에 실패해 "
@@ -1326,13 +1340,13 @@ with tab3:
             st.markdown(
                 "#### 🖼️ 미리보기 — 위/아래로 순서를 바꾸거나, 다음 블록과 "
                 "가로로 합치거나(옆에 배치하면 두 이미지가 작아지며 나란히 "
-                "정렬됩니다), 삭제할 수 있습니다"
+                "정렬됩니다), 합친 블록은 다시 분리하거나, 삭제할 수 있습니다"
             )
 
-            for idx, block in enumerate(active_blocks):
+            for idx, entry in enumerate(active_blocks):
                 with st.container(border=True):
-                    st.image(block, use_container_width=True)
-                    btn_cols = st.columns(4)
+                    st.image(entry["image"], use_container_width=True)
+                    btn_cols = st.columns(5)
                     if btn_cols[0].button(
                         "⬆️ 위로",
                         key=f"detail_up_{idx}",
@@ -1363,8 +1377,9 @@ with tab3:
                         disabled=(idx == len(active_blocks) - 1),
                         use_container_width=True,
                     ):
+                        next_entry = active_blocks[idx + 1]
                         merged_row = combine_image_row(
-                            [active_blocks[idx], active_blocks[idx + 1]]
+                            [entry["image"], next_entry["image"]]
                         )
                         row_w, row_h = merged_row.size
                         new_h = int(row_h * (detail_target_width / row_w))
@@ -1372,10 +1387,23 @@ with tab3:
                             (detail_target_width, new_h),
                             Image.Resampling.LANCZOS,
                         )
-                        active_blocks[idx : idx + 2] = [merged_row]
+                        active_blocks[idx : idx + 2] = [
+                            {
+                                "image": merged_row,
+                                "parts": [entry, next_entry],
+                            }
+                        ]
                         st.session_state["detail_active_blocks"] = active_blocks
                         st.rerun()
-                    if btn_cols[3].button(
+                    if entry["parts"] and btn_cols[3].button(
+                        "↩️ 분리하기",
+                        key=f"detail_split_{idx}",
+                        use_container_width=True,
+                    ):
+                        active_blocks[idx : idx + 1] = entry["parts"]
+                        st.session_state["detail_active_blocks"] = active_blocks
+                        st.rerun()
+                    if btn_cols[4].button(
                         "🗑️ 삭제",
                         key=f"detail_del_{idx}",
                         use_container_width=True,
@@ -1386,16 +1414,16 @@ with tab3:
 
             if active_blocks:
                 block_gap = 20
-                total_h = sum(b.height for b in active_blocks) + block_gap * (
-                    len(active_blocks) - 1
-                )
+                total_h = sum(
+                    e["image"].height for e in active_blocks
+                ) + block_gap * (len(active_blocks) - 1)
                 stacked = Image.new(
                     "RGB", (detail_target_width, total_h), (255, 255, 255)
                 )
                 y = 0
-                for i, b in enumerate(active_blocks):
-                    stacked.paste(b, (0, y))
-                    y += b.height
+                for i, e in enumerate(active_blocks):
+                    stacked.paste(e["image"], (0, y))
+                    y += e["image"].height
                     if i < len(active_blocks) - 1:
                         y += block_gap
                 st.session_state["detail_link_main_img"] = stacked
