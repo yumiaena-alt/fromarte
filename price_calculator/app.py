@@ -130,15 +130,25 @@ def fetch_naver_related_keywords(seed_keyword):
 
     try:
         res = requests.get(
-            "https://api.naver.com" + uri,
+            "https://api.searchad.naver.com" + uri,
             headers=headers,
             params=params,
             timeout=10,
         )
-        res.raise_for_status()
-        data = res.json()
     except Exception as e:
-        return None, f"네이버 키워드 API 호출 실패: {e}"
+        return None, f"네이버 키워드 API 요청 자체가 실패했습니다: {e}"
+
+    if res.status_code != 200:
+        try:
+            detail = res.json()
+        except Exception:
+            detail = res.text
+        return None, (
+            f"네이버 키워드 API 호출 실패 (HTTP {res.status_code}): {detail} "
+            f"(Customer ID: {customer_id})"
+        )
+
+    data = res.json()
 
     results = []
     for item in data.get("keywordList", []):
