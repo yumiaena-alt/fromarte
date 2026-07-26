@@ -1395,11 +1395,12 @@ with tab3:
                         ]
                         st.session_state["detail_active_blocks"] = active_blocks
                         st.rerun()
-                    if entry["parts"] and btn_cols[3].button(
+                    if btn_cols[3].button(
                         "↩️ 분리하기",
                         key=f"detail_split_{idx}",
+                        disabled=not entry["parts"],
                         use_container_width=True,
-                    ):
+                    ) and entry["parts"]:
                         active_blocks[idx : idx + 1] = entry["parts"]
                         st.session_state["detail_active_blocks"] = active_blocks
                         st.rerun()
