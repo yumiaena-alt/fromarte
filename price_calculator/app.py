@@ -1,11 +1,7 @@
-import base64
 import math
 import os
 import re
-import time
-import bcrypt
 import pandas as pd
-import requests
 import streamlit as st
 
 st.set_page_config(
@@ -18,106 +14,7 @@ st.write(
 )
 
 # ------------------------------------------------------------------
-# 1. 네이버 커머스 API 연동 함수 (공식 bcrypt 서명 방식)
-# ------------------------------------------------------------------
-
-
-def fetch_naver_api_price(smartstore_url):
-    """스마트스토어 URL에서 상품ID를 추출하여 네이버 Commerce API(공식 bcrypt 서명 방식)로 판매가를 조회합니다."""
-    if not smartstore_url or not isinstance(smartstore_url, str):
-        return None, "주소가 입력되지 않았습니다."
-
-    # URL 패턴 매칭
-    match = re.search(r"products/(\d+)", smartstore_url)
-    if not match:
-        return (
-            None,
-            "URL 형태가 올바르지 않습니다. (예: .../products/12345678)",
-        )
-
-    product_id = match.group(1)
-
-    client_id = st.secrets.get("NAVER_CLIENT_ID") or os.environ.get(
-        "NAVER_CLIENT_ID"
-    )
-    client_secret = st.secrets.get("NAVER_CLIENT_SECRET") or os.environ.get(
-        "NAVER_CLIENT_SECRET"
-    )
-
-    if not client_id or not client_secret:
-        return (
-            None,
-            "네이버 API Client ID 또는 Secret이 설정되지 않았습니다. (.streamlit/secrets.toml 확인)",
-        )
-
-    try:
-        # 1. 네이버 커머스 API 공식 Timestamp & bcrypt 서명 생성
-        # 서버 시간 차로 인한 오류 방지를 위해 3초 차감
-        timestamp = str(int((time.time() - 3) * 1000))
-
-        # 비밀번호 생성: client_id + "_" + timestamp
-        password = f"{client_id}_{timestamp}"
-
-        # bcrypt hash 생성 (client_secret을 salt로 사용)
-        hashed = bcrypt.hashpw(
-            password.encode("utf-8"), client_secret.encode("utf-8")
-        )
-
-        # Base64 인코딩
-        client_secret_sign = base64.b64encode(hashed).decode("utf-8")
-
-        # 2. 토큰 발급 요청
-        token_url = "https://api.commerce.naver.com/external/v1/oauth2/token"
-        token_data = {
-            "client_id": client_id,
-            "timestamp": timestamp,
-            "client_secret_sign": client_secret_sign,
-            "grant_type": "client_credentials",
-            "type": "SELF",
-        }
-
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
-        token_res = requests.post(
-            token_url, data=token_data, headers=headers, timeout=5
-        )
-
-        if token_res.status_code != 200:
-            return (
-                None,
-                f"토큰 발급 실패 (상태 코드: {token_res.status_code}, 내용: {token_res.text})",
-            )
-
-        access_token = token_res.json().get("access_token")
-        if not access_token:
-            return None, "토큰 발급 응답에 access_token이 없습니다."
-
-        # 3. 상품 상세 정보 조회
-        api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
-        auth_headers = {"Authorization": f"Bearer {access_token}"}
-        res = requests.get(api_url, headers=auth_headers, timeout=5)
-
-        if res.status_code != 200:
-            return (
-                None,
-                f"상품 API 조회 실패 (상태 코드: {res.status_code}, 내용: {res.text})",
-            )
-
-        data = res.json()
-        origin_product = data.get("originProduct", {})
-        discount_price = origin_product.get("salePrice", 0)
-
-        if discount_price > 0:
-            return int(discount_price), "성공"
-        else:
-            return None, "상품 판매가가 0원입니다."
-
-    except Exception as e:
-        return None, f"API 통신 오류: {str(e)}"
-
-
-# ------------------------------------------------------------------
-# 2. 전산 데이터베이스 로드
+# 1. 전산 데이터베이스 로드
 # ------------------------------------------------------------------
 
 
@@ -151,7 +48,7 @@ def load_master_db():
 db, status_msg = load_master_db()
 
 # ------------------------------------------------------------------
-# 3. 상품 부분 검색 및 자동 선택
+# 2. 상품 부분 검색 및 자동 선택
 # ------------------------------------------------------------------
 st.subheader("1. 상품 검색 및 데이터 선택")
 
@@ -251,7 +148,7 @@ else:
 st.markdown("---")
 
 # ------------------------------------------------------------------
-# 4. 상세 정보 입력 및 출처 표기 기능
+# 3. 상세 정보 입력 및 스마트스토어 확인 로직
 # ------------------------------------------------------------------
 col1, col2 = st.columns(2)
 
@@ -269,75 +166,84 @@ with col1:
     )
 
 with col2:
-    if not smartstore_url.strip():
-        st.markdown(
-            "<div style='background-color:#fff0e6; padding:8px; border-radius:5px; border:1px solid #ff9933; color:#cc5500; font-weight:bold; margin-bottom:8px;'>⚠️ 스마트스토어 주소가 없습니다! (붙여넣기)</div>",
-            unsafe_allow_html=True,
-        )
-
     input_url = st.text_input(
         "스마트스토어 주소",
         value=smartstore_url,
-        placeholder="https://smartstore.naver.com/...",
+        placeholder="https://smartstore.naver.com/fromarte/products/...",
     )
 
-    if input_url.strip():
-        st.link_button("🔗 스마트스토어 상품페이지 직접 열기", input_url.strip())
+    # 주소 유효성 검사 및 안내 메시지
+    clean_url = input_url.strip()
 
-# 스마트스토어 실시간 API 또는 전산 등록가 자동 추출 및 출처 판단
-api_fetched_price, api_msg = fetch_naver_api_price(input_url)
-default_ss_price = 0
-price_status_type = ""
-price_source_badge = ""
-
-if api_fetched_price is not None:
-    default_ss_price = api_fetched_price
-    price_status_type = "success"
-    price_source_badge = "🟢 **네이버 공식 API**로 불러온 실시간 판매가입니다."
-elif db_selling_price > 0:
-    default_ss_price = db_selling_price
-    price_status_type = "error"
-    # 📌 DB 등록가는 확인용이므로 붉은색 강한 경고 박스로 표기
-    price_source_badge = f"🚨 **[주의] 네이버 API 연동 실패 ({api_msg})**\n\n이 금액은 API 실시간가가 아닌 **전산 DB 엑셀에 등록되어 있던 옛날 판매가**입니다. 실제 스마트스토어 판매가와 다를 수 있으니 반드시 확인 후 수정해 주세요!"
-else:
-    price_status_type = "info"
-    price_source_badge = (
-        "⚪ 등록된 가격이 없어 0원으로 표시됩니다. (직접 입력 가능)"
-    )
-
-col_ss1, col_ss2 = st.columns([2, 1])
-with col_ss1:
-    input_ss_price = st.number_input(
-        "네이버 스마트스토어 실제 판매가 (직접 수정/입력 가능)",
-        value=int(default_ss_price),
-        step=100,
-        help="주소를 통해 자동 수집된 가격이 있거나 직접 변경할 금액을 입력하세요.",
-    )
-
-    # 📌 출처 표기 시각화
-    if price_status_type == "error":
-        st.error(price_source_badge)
-    elif price_status_type == "success":
-        st.success(price_source_badge)
+    if not clean_url:
+        st.warning(
+            "⚠️ 스마트스토어 주소가 비어있습니다. 수동으로 주소를 입력해 주세요."
+        )
+    elif not (
+        clean_url.startswith("http://") or clean_url.startswith("https://")
+    ) or not ("naver.com" in clean_url or "products/" in clean_url):
+        st.error(
+            "🚨 올바른 스마트스토어 주소 형식이 아닙니다. (예: https://smartstore.naver.com/...)"
+        )
     else:
-        st.caption(price_source_badge)
+        # 올바른 주소 형식인 경우 즉시 바로가기 버튼 제공
+        st.link_button(
+            "🔗 스마트스토어 상품페이지 직접 열기",
+            clean_url,
+            use_container_width=True,
+        )
 
 # ------------------------------------------------------------------
-# 5. 스마트스토어 판매가 비교 및 재계산 로직
+# 4. 스마트스토어 판매가 입력 및 경고창 끄기 제어
+# ------------------------------------------------------------------
+col_ss1, col_ss2 = st.columns([2, 1])
+
+with col_ss1:
+    input_ss_price = st.number_input(
+        "네이버 스마트스토어 실제 판매가 (직접 확인 후 수정/입력)",
+        value=int(db_selling_price),
+        step=100,
+        help="스마트스토어 상품페이지에서 실제 가격을 확인한 후 입력하세요.",
+    )
+
+    # 사용자가 가격을 수정했는지 여부 확인 (전산 DB 초기값과 다른지 비교)
+    # 📌 전산 DB 값 그대로이면 붉은 경고창 표시 ➔ 숫자를 직접 변경하면 경고창이 꺼지고 정상(green) 안내 표시
+    if db_selling_price > 0:
+        if input_ss_price == db_selling_price:
+            st.error(
+                f"🚨 **[확인 필요] 전산 DB에 등록된 옛날 판매가({db_selling_price:,}원)입니다.**\n\n"
+                f"위 버튼을 눌러 실제 스마트스토어 판매가를 확인하신 후, 수치가 다르면 숫자를 입력해 주세요. (가격을 확인/수정하면 이 경고창이 꺼집니다)"
+            )
+        else:
+            st.success(
+                f"🟢 **실제 스마트스토어 판매가({input_ss_price:,}원)가 확인되어 정상 반영되었습니다.**"
+            )
+    else:
+        if input_ss_price > 0:
+            st.success(
+                f"🟢 **스마트스토어 판매가({input_ss_price:,}원)가 직접 입력되었습니다.**"
+            )
+        else:
+            st.caption(
+                "⚪ 등록된 가격이 없어 0원으로 표시됩니다. (스마트스토어 확인 후 직접 입력하세요)"
+            )
+
+# ------------------------------------------------------------------
+# 5. 마켓별 판매가 자동 산출 로직
 # ------------------------------------------------------------------
 if input_yuan > 0:
 
     def roundup_100(val):
         return math.ceil(val / 100) * 100
 
-    # 1) 기존 원가 기반 계산 (기본 수식)
+    # 1) 원가 기반 기본 수식
     b1_cost_no_vat = input_yuan * 320
     b2_cost_vat = b1_cost_no_vat * 1.1
 
     orig_consumer = roundup_100(b2_cost_vat * 3)
     orig_recommend = roundup_100(b2_cost_vat * 2)  # 원가 기준 추천가
 
-    # 2) 스마트스토어 실제 판매가와 추천가 비교
+    # 2) 실제 스마트스토어 판매가 기준가 재설정
     ss_price = input_ss_price
 
     if ss_price > orig_recommend:
@@ -360,7 +266,7 @@ if input_yuan > 0:
             price_case_msg = "normal"
             price_case_text = ""
 
-    # 3) 최종 기준가 바탕 마켓별 산출
+    # 3) 마켓별 계산
     b5_09 = roundup_100(final_recommend * 0.9)
     b11_dome_shin = roundup_100(b5_09 * 0.95)
 
