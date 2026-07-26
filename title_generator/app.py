@@ -492,7 +492,8 @@ with tab2:
 """
 
                 try:
-                    model = genai.GenerativeModel("gemini-1.5-flash")
+                    # 💡 models/gemini-1.5-flash 경로 명시로 404 에러 수정완료!
+                    model = genai.GenerativeModel("models/gemini-1.5-flash")
                     response = model.generate_content(prompt)
 
                     st.success("✅ SEO 상품명 생성 완료!")
