@@ -1318,18 +1318,19 @@ with tab3:
 
         raw_blocks = st.session_state.get("detail_blocks_raw")
         if raw_blocks:
-            st.markdown("#### 🖼️ 포함할 블록 선택 (화질 낮은 이미지는 체크 해제)")
+            st.markdown(
+                "#### 🖼️ 미리보기 — 실제 결과물과 같은 순서입니다. "
+                "필요 없는 블록은 바로 아래 삭제 버튼을 누르세요"
+            )
             keep_map = st.session_state.setdefault("detail_block_keep", {})
-            preview_cols = st.columns(4)
+
             for idx, block in enumerate(raw_blocks):
-                col = preview_cols[idx % 4]
-                col.image(block, use_container_width=True)
-                keep = col.checkbox(
-                    "포함",
-                    value=keep_map.get(idx, True),
-                    key=f"detail_block_keep_{idx}",
-                )
-                keep_map[idx] = keep
+                if not keep_map.get(idx, True):
+                    continue
+                st.image(block, use_container_width=True)
+                if st.button("🗑️ 이 블록 삭제", key=f"detail_block_del_{idx}"):
+                    keep_map[idx] = False
+                    st.rerun()
 
             kept_blocks = [
                 b for i, b in enumerate(raw_blocks) if keep_map.get(i, True)
