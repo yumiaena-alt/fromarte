@@ -11,7 +11,7 @@ st.set_page_config(
 
 st.title("💰 마켓별 판매가 자동 계산기")
 st.write(
-    "전산 상품명을 키워드로 부분 검색하여 선택하거나, 매입위안을 직접 입력해 마켓별 판매가를 산출하세요."
+    "전산 상품을 검색하거나 매입위안/스마트스토어 판매가를 입력하여 맞춤형 판매가를 산출하세요."
 )
 
 # ------------------------------------------------------------------
@@ -22,16 +22,14 @@ st.write(
 @st.cache_data(ttl=60)
 def fetch_naver_api_price(smartstore_url):
     if not smartstore_url or "smartstore.naver.com" not in smartstore_url:
-        return None, "유효한 스마트스토어 주소가 아닙니다."
+        return None
 
-    # URL에서 상품 ID(숫자) 추출
     match = re.search(r"products/(\d+)", smartstore_url)
     if not match:
-        return None, "상품 ID를 추출할 수 없습니다."
+        return None
 
     product_id = match.group(1)
 
-    # Secrets 및 환경변수 확인
     client_id = st.secrets.get("NAVER_CLIENT_ID") or os.environ.get(
         "NAVER_CLIENT_ID"
     )
@@ -40,10 +38,9 @@ def fetch_naver_api_price(smartstore_url):
     )
 
     if not client_id or not client_secret:
-        return None, "Streamlit Secrets 설정이 필요합니다."
+        return None
 
     try:
-        # 1) 토큰 발급
         token_url = "https://api.commerce.naver.com/external/v1/oauth2/token"
         token_data = {
             "client_id": client_id,
@@ -52,29 +49,24 @@ def fetch_naver_api_price(smartstore_url):
             "type": "SELF",
         }
         token_res = requests.post(token_url, data=token_data, timeout=5)
-        token_json = token_res.json()
-        access_token = token_json.get("access_token")
+        access_token = token_res.json().get("access_token")
 
         if not access_token:
-            return None, "API 토큰 발급 실패"
+            return None
 
-        # 2) 상품 상세 조회
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
         res = requests.get(api_url, headers=headers, timeout=5)
         data = res.json()
 
-        # 실시간 가격 추출 (할인가 또는 기준가)
         origin_product = data.get("originProduct", {})
         discount_price = origin_product.get("salePrice", 0)
 
         if discount_price > 0:
-            return int(discount_price), "성공"
-        else:
-            return None, "상품 가격 정보를 찾을 수 없습니다."
-
-    except Exception as e:
-        return None, f"API 접속 오류 ({str(e)})"
+            return int(discount_price)
+    except Exception:
+        pass
+    return None
 
 
 # ------------------------------------------------------------------
@@ -97,7 +89,7 @@ def load_master_db():
                 df = pd.read_excel(path)
                 return df, path
             except Exception as e:
-                return None, f"파일은 찾았으나 읽기 실패 ({path}): {str(e)}"
+                return None, f"파일 읽기 실패: {str(e)}"
 
     folder_files = []
     if os.path.exists("price_calculator"):
@@ -112,9 +104,9 @@ def load_master_db():
 db, status_msg = load_master_db()
 
 # ------------------------------------------------------------------
-# 3. 스마트 부분 검색 및 자동 선택 (1건 시 드롭박스 패스)
+# 3. 상품 부분 검색 및 자동 선택
 # ------------------------------------------------------------------
-st.subheader("1. 상품 검색 및 선택")
+st.subheader("1. 상품 검색 및 데이터 선택")
 
 selected_product_name = ""
 yuan_price = 0.0
@@ -210,7 +202,7 @@ else:
 st.markdown("---")
 
 # ------------------------------------------------------------------
-# 4. 상세 정보 입력 및 붉은색 경고
+# 4. 상세 정보 입력 및 스마트스토어 판매가 설정
 # ------------------------------------------------------------------
 col1, col2 = st.columns(2)
 
@@ -243,47 +235,83 @@ with col2:
     if input_url.strip():
         st.link_button("🔗 스마트스토어 상품페이지 직접 열기", input_url.strip())
 
+# 스마트스토어 실시간 API 또는 전산 등록가 자동 추출
+api_fetched_price = fetch_naver_api_price(input_url)
+default_ss_price = 0
+
+if api_fetched_price:
+    default_ss_price = api_fetched_price
+elif db_selling_price > 0:
+    default_ss_price = db_selling_price
+
+col_ss1, col_ss2 = st.columns([2, 1])
+with col_ss1:
+    input_ss_price = st.number_input(
+        "네이버 스마트스토어 실제 판매가 (직접 수정/입력 가능)",
+        value=int(default_ss_price),
+        step=100,
+        help="주소를 통해 자동 수집된 가격이 있거나 직접 변경할 금액을 입력하세요.",
+    )
+
 # ------------------------------------------------------------------
-# 5. 마켓별 판매가 자동 계산 및 API 연동 판매가 출력
+# 5. 스마트스토어 판매가 비교 및 재계산 로직
 # ------------------------------------------------------------------
 if input_yuan > 0:
 
     def roundup_100(val):
         return math.ceil(val / 100) * 100
 
+    # 1) 기존 원가 기반 계산 (기본 수식)
     b1_cost_no_vat = input_yuan * 320
     b2_cost_vat = b1_cost_no_vat * 1.1
 
-    b4_consumer = roundup_100(b2_cost_vat * 3)
-    b5_recommend = roundup_100(b2_cost_vat * 2)
+    orig_consumer = roundup_100(b2_cost_vat * 3)
+    orig_recommend = roundup_100(b2_cost_vat * 2)  # 원가 기준 추천가
 
-    b5_09 = roundup_100(b5_recommend * 0.9)
+    # 2) 스마트스토어 실제 판매가와 추천가 비교
+    ss_price = input_ss_price
+
+    if ss_price > orig_recommend:
+        # 스마트스토어 가격이 더 높은 경우 ➔ 스마트스토어 가격을 기준가로 설정
+        final_recommend = ss_price
+
+        # 추천 소비자가는 할인 표시 시 거부감이 없도록 스마트스토어 가격의 약 1.33~1.5배 설정 (100원 단위 올림)
+        final_consumer = roundup_100(ss_price * 1.33)
+        if final_consumer <= ss_price:
+            final_consumer = roundup_100(ss_price * 1.5)
+
+        price_case_msg = "info"
+        price_case_text = f"💡 **스마트스토어 판매가({ss_price:,}원)**가 원가 기준 추천가({orig_recommend:,}원)보다 높아 **스마트스토어 판매가를 기준가**로 적용하여 재산출했습니다."
+
+    else:
+        # 스마트스토어 가격이 같거나 더 낮은 경우 ➔ 원래 기준가 유지
+        final_recommend = orig_recommend
+        final_consumer = orig_consumer
+
+        if ss_price > 0 and ss_price < orig_recommend:
+            price_case_msg = "warning"
+            price_case_text = f"🚨 **주의:** 현재 스마트스토어 판매가({ss_price:,}원)가 추천 판매가({orig_recommend:,}원)보다 낮습니다! 마진 확보를 위해 **스마트스토어 판매가를 인상**하는 것을 권장합니다."
+        else:
+            price_case_msg = "normal"
+            price_case_text = ""
+
+    # 3) 최종 기준가(final_recommend) 바탕으로 각 마켓 가격 계산
+    b5_09 = roundup_100(final_recommend * 0.9)
     b11_dome_shin = roundup_100(b5_09 * 0.95)
 
     b14_tobizon = b11_dome_shin
     b15_sellingkok = b14_tobizon
     b16_onchannel = b15_sellingkok
 
-    b5_12 = roundup_100(b5_recommend * 1.2)
-
-    # 네이버 공식 커머스 API로 실시간가 조회
-    api_price, api_msg = fetch_naver_api_price(input_url)
-
-    if api_price:
-        smartstore_display_price = f"{api_price:,}원 (네이버 공식 API 연동)"
-    elif db_selling_price > 0:
-        smartstore_display_price = f"{db_selling_price:,}원 (전산등록가)"
-    else:
-        smartstore_display_price = f"조회 실패 ({api_msg})"
+    b5_12 = roundup_100(final_recommend * 1.2)
 
     prices = {
-        "🏷️ 네이버 스마트스토어 실제 판매가": smartstore_display_price,
-        "추천 소비자가": b4_consumer,
-        "추천 판매가 (기준가)": b5_recommend,
+        "추천 소비자가": final_consumer,
+        "추천 판매가 (기준가)": final_recommend,
         "--- 도매 마켓 그룹 ---": "",
         "오너클랜": b5_09,
-        "지마켓 / 옥션": b5_recommend,
-        "쿠팡": b5_recommend,
+        "지마켓 / 옥션": final_recommend,
+        "쿠팡": final_recommend,
         "K셀러": b5_09,
         "도매창고": b5_09,
         "도매의신": b11_dome_shin,
@@ -292,8 +320,8 @@ if input_yuan > 0:
         "투비즈온": b14_tobizon,
         "셀링콕 등 도매마켓": b15_sellingkok,
         "온채널": b16_onchannel,
-        "11번가": b5_recommend,
-        "네이버 스마트스토어": b5_recommend,
+        "11번가": final_recommend,
+        "네이버 스마트스토어": final_recommend,
         "--- 홈쇼핑 / 패션몰 그룹 ---": "",
         "패션플러스": b5_12,
         "GS홈쇼핑": b5_12,
@@ -304,9 +332,16 @@ if input_yuan > 0:
 
     st.markdown("---")
     st.subheader("2. 마켓별 산출 판매가 목록")
+
+    # 원가 및 상태 안내 메시지 출력
     st.info(
-        f"💡 **원가 정보:** 매입가 ¥{input_yuan:,} ➔ 원가(VAT포함) {int(b2_cost_vat):,}원"
+        f"💡 **원가 정보:** 매입가 ¥{input_yuan:,} ➔ 원가(VAT포함) {int(b2_cost_vat):,}원 | **원가 기준 기본 추천가:** {orig_recommend:,}원"
     )
+
+    if price_case_msg == "info":
+        st.info(price_case_text)
+    elif price_case_msg == "warning":
+        st.warning(price_case_text)
 
     for market, price in prices.items():
         if market.startswith("---"):
@@ -314,8 +349,9 @@ if input_yuan > 0:
         else:
             col_m, col_p = st.columns([2, 1])
             col_m.write(f"**{market}**")
-            if isinstance(price, int):
-                col_p.code(f"{price:,}원", language=None)
+
+            if isinstance(price, (int, float)):
+                col_p.code(f"{price:,}", language=None)
             else:
                 col_p.code(f"{price}", language=None)
 
