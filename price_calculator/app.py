@@ -1834,3 +1834,13 @@ with tab3:
                         st.success("✅ ESM+ 업로드 완료!")
                         st.code(f'<img src="{esm_url}">', language=None)
                         st.code(esm_url, language=None)
+
+            st.markdown("---")
+            st.download_button(
+                label="📥 완성된 상세페이지 다운로드 (영문 파일명)",
+                data=byte_im,
+                file_name=output_filename,
+                mime="image/jpeg",
+                key="detail_download_btn_bottom",
+                use_container_width=True,
+            )
