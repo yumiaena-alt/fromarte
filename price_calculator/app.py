@@ -617,6 +617,44 @@ def load_master_db():
 db, status_msg = load_master_db()
 
 # ------------------------------------------------------------------
+# 금지어 / 지식재산권 사전 검수기
+#
+# 참고용 필터입니다. 상표권 위험 단어 목록은 완전한 상표 데이터베이스가
+# 아니라 자주 발생하는 사례 위주로 정리한 샘플이며, 법적으로 안전함을
+# 보장하지 않습니다. 애매한 경우 반드시 별도로 확인하세요.
+# ------------------------------------------------------------------
+TRADEMARK_RISK_WORDS = [
+    "나이키", "아디다스", "디즈니", "카카오프렌즈", "라인프렌즈", "뽀로로",
+    "산리오", "헬로키티", "포켓몬", "짱구", "스타벅스", "구찌", "샤넬",
+    "루이비통", "에르메스", "테슬라", "지프", "노스페이스", "뉴발란스",
+    "아이폰", "갤럭시", "레고",
+]
+
+MARKET_BANNED_WORDS = [
+    "최저가", "1+1", "2+1", "무료배송", "특가", "인기", "1위", "국내1위",
+    "업계1위", "초특가", "폭탄세일", "균일가", "한정판매", "매진임박",
+    "완판임박", "대박특가",
+]
+
+MEDICAL_CLAIM_WORDS = [
+    "탈취", "살균", "치료", "효능", "효과", "항균", "소독", "완치", "진통", "소염",
+]
+
+
+def check_prohibited_terms(text):
+    """텍스트에서 상표권/마켓 금지어/의료 오인 표현을 찾아 카테고리별로 반환."""
+    findings = {}
+    for label, word_list in [
+        ("🚫 상표권/지식재산권 위험 단어", TRADEMARK_RISK_WORDS),
+        ("⚠️ 마켓 금지 수식어 (SEO 제재 위험)", MARKET_BANNED_WORDS),
+        ("💊 의료기기/화장품 오인 표현 (인증 필요)", MEDICAL_CLAIM_WORDS),
+    ]:
+        hits = sorted({w for w in word_list if w in text})
+        if hits:
+            findings[label] = hits
+    return findings
+
+# ------------------------------------------------------------------
 # 상단 탭 분리 (1. Title Generator / 2. 마켓별 판매가 계산기 / 3. 상세페이지 합치기)
 # ------------------------------------------------------------------
 tab1, tab2, tab3 = st.tabs(
@@ -880,6 +918,10 @@ KEYWORDS: <활용 키워드 20개를 검색량 높은 순으로 쉼표(,)로 구
                             else:
                                 st.caption(f"실측 {byte_len}Byte")
 
+                            title_findings = check_prohibited_terms(title)
+                            for label, hits in title_findings.items():
+                                st.warning(f"{label}: {', '.join(hits)}")
+
                         if keywords_line:
                             st.markdown("**활용 키워드 20개**")
                             st.code(keywords_line, language=None)
@@ -891,6 +933,33 @@ KEYWORDS: <활용 키워드 20개를 검색량 높은 순으로 쉼표(,)로 구
                     if candidate_models:
                         with st.expander("조회된 사용 가능 모델 목록 보기"):
                             st.write(candidate_models)
+
+    st.markdown("---")
+    st.markdown("#### 🚨 키워드 금지어 / 지식재산권 사전 검수기")
+    st.caption(
+        "최종 등록 전에 상품명·상세페이지 문구를 붙여넣어 빠르게 확인하세요. "
+        "⚠️ 참고용 필터입니다 — 상표권 위험 단어 목록은 자주 발생하는 사례 "
+        "위주의 샘플이며 법적 안전을 보장하지 않습니다. 애매한 경우 반드시 "
+        "별도로 확인하세요."
+    )
+    check_text = st.text_area(
+        "검수할 문구를 붙여넣으세요 (상품명, 상세페이지 문구 등)",
+        height=100,
+        key="tg_check_text",
+    )
+    if st.button("🔍 지금 검수하기", key="tg_check_btn"):
+        if not check_text.strip():
+            st.warning("⚠️ 검수할 문구를 입력해주세요.")
+        else:
+            findings = check_prohibited_terms(check_text)
+            if not findings:
+                st.success(
+                    "✅ 등록된 금지어 목록 기준으로는 특이사항이 발견되지 "
+                    "않았습니다."
+                )
+            else:
+                for label, hits in findings.items():
+                    st.error(f"{label}: {', '.join(hits)}")
 
 # ==================================================================
 # TAB 2: 마켓별 판매가 계산기
