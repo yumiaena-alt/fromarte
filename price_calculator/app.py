@@ -160,6 +160,41 @@ BANNER_STUDIO_WHITE_TEMPLATE = (
     "1000x1000 format."
 )
 
+BANNER_STUDIO_WHITE_GROUP_TEMPLATE = (
+    "Create a professional e-commerce studio product photograph showing the "
+    "{colors} versions of the product from the attached reference photo, "
+    "displayed together as a matching set. Preserve each item's exact shape, "
+    "proportions, materials, textures, stitching, printed logos, and any text "
+    "exactly as photographed — do not redesign, distort, or reinterpret any of "
+    "them. Arrange them neatly together, centered in the frame with balanced "
+    "negative space (the group should occupy roughly 60-70% of the frame, not "
+    "touching the edges), at a consistent scale and angle matching the "
+    "reference photo. Light them with a classic three-point studio setup: a "
+    "large soft key light from the upper left, a gentle fill light to soften "
+    "shadows, and a subtle rim light separating the products from the "
+    "background. Place them on a seamless, glossy white studio floor with a "
+    "soft, realistic reflection fading toward the bottom, and soft "
+    "naturally-falling contact shadows. The final image should look like an "
+    "actual high-end commercial product photograph shot on a professional "
+    "camera — sharp focus, accurate colors, no AI-generation artifacts, no "
+    "warped or melted details, no blurred or garbled logos or text. Square "
+    "1000x1000 format."
+)
+
+
+def _join_colors_for_prompt(colors):
+    if len(colors) == 1:
+        return colors[0]
+    if len(colors) == 2:
+        return f"{colors[0]} and {colors[1]}"
+    return ", ".join(colors[:-1]) + f", and {colors[-1]}"
+
+
+def _safe_filename_token(text, fallback):
+    """다운로드 파일명에 한글 등 비ASCII 문자가 섞이지 않도록 영문/숫자만 남긴다."""
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", text)
+    return cleaned if cleaned else fallback
+
 
 BANNER_MODEL_OPTIONS = {
     "Nano Banana 2 (저렴, 테스트용 추천)": "gemini-3.1-flash-image",
@@ -1979,11 +2014,58 @@ with tab5:
                             caption=f"{color} 배너컷",
                             use_container_width=True,
                         )
+                        safe_color = _safe_filename_token(color, f"color{idx + 1}")
                         st.download_button(
                             f"📥 {color} 배너컷 다운로드",
                             data=out_buf,
-                            file_name=f"banner_{color}_studio_white.jpg",
+                            file_name=f"banner_{safe_color}_studio_white.jpg",
                             mime="image/jpeg",
-                            key=f"banner_download_{color}",
+                            key=f"banner_download_{idx}",
                             use_container_width=True,
                         )
+
+                    if len(colors) > 1:
+                        time.sleep(3)
+                        with st.spinner("전체 모듬 배너컷 생성 중..."):
+                            group_prompt_text = (
+                                BANNER_STUDIO_WHITE_GROUP_TEMPLATE.format(
+                                    colors=_join_colors_for_prompt(colors)
+                                )
+                            )
+                            group_result_bytes, group_err = fetch_gemini_banner_image(
+                                image_png_bytes, group_prompt_text, banner_model_name
+                            )
+
+                        if group_err:
+                            st.error(f"❌ 전체 모듬 배너컷 생성 실패: {group_err}")
+                        else:
+                            try:
+                                group_img = Image.open(
+                                    io.BytesIO(group_result_bytes)
+                                ).convert("RGB")
+                                group_img = group_img.resize(
+                                    (1000, 1000), Image.LANCZOS
+                                )
+                                group_out_buf = io.BytesIO()
+                                group_img.save(
+                                    group_out_buf, format="JPEG", quality=95
+                                )
+                                group_out_buf.seek(0)
+                            except Exception as e:
+                                st.error(f"❌ 전체 모듬 이미지 처리 실패: {e}")
+                                group_img = None
+
+                            if group_img is not None:
+                                st.image(
+                                    group_img,
+                                    caption="전체 모듬 배너컷",
+                                    use_container_width=True,
+                                )
+                                st.download_button(
+                                    "📥 전체 모듬 배너컷 다운로드",
+                                    data=group_out_buf,
+                                    file_name="banner_all_colors_studio_white.jpg",
+                                    mime="image/jpeg",
+                                    key="banner_download_group",
+                                    use_container_width=True,
+                                )
