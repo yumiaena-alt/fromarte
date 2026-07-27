@@ -1095,6 +1095,7 @@ KEYWORDS: <활용 키워드 20개를 검색량 높은 순으로 쉼표(,)로 구
                 candidate_models = get_available_flash_models(bool(gemini_api_key))
 
                 response_text = None
+                fallback_text = None
                 last_error = None
 
                 if not candidate_models:
@@ -1108,11 +1109,25 @@ KEYWORDS: <활용 키워드 20개를 검색량 높은 순으로 쉼표(,)로 구
                             model = genai.GenerativeModel(model_name)
                             res = model.generate_content(prompt)
                             if res and res.text:
-                                response_text = res.text
-                                break
+                                if fallback_text is None:
+                                    fallback_text = res.text
+                                candidate_titles, _ = parse_ai_output(res.text)
+                                max_byte = max(
+                                    (kr_byte_len(t) for t in candidate_titles),
+                                    default=0,
+                                )
+                                if max_byte >= 85:
+                                    response_text = res.text
+                                    break
+                                last_error = (
+                                    f"[{model_name}] 결과가 {max_byte}Byte로 짧아 "
+                                    "다음 모델로 재시도"
+                                )
                         except Exception as err:
                             last_error = f"[{model_name}] {err}"
-                            continue
+
+                    if not response_text:
+                        response_text = fallback_text
 
                 if response_text:
                     titles, keywords_line = parse_ai_output(response_text)
