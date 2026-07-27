@@ -152,7 +152,7 @@ BANNER_STUDIO_WHITE_TEMPLATE = (
 )
 
 
-def fetch_gemini_banner_image(image_png_bytes, prompt_text):
+def fetch_gemini_banner_image(image_png_bytes, prompt_text, max_retries=3):
     """Nano Banana Pro(gemini-3-pro-image-preview)로 배너컷 이미지를 생성한다."""
     gemini_api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
         "GEMINI_API_KEY"
@@ -160,35 +160,51 @@ def fetch_gemini_banner_image(image_png_bytes, prompt_text):
     if not gemini_api_key:
         return None, "GEMINI_API_KEY가 등록되지 않았습니다. Streamlit Secrets 설정을 확인해주세요."
 
-    try:
-        api_url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            "gemini-3-pro-image-preview:generateContent"
-        )
-        image_b64 = base64.b64encode(image_png_bytes).decode("utf-8")
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": prompt_text},
-                        {
-                            "inlineData": {
-                                "mimeType": "image/png",
-                                "data": image_b64,
-                            }
-                        },
-                    ]
-                }
-            ],
-            "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
-        }
-        res = requests.post(
-            api_url, params={"key": gemini_api_key}, json=payload, timeout=90
-        )
-        res.raise_for_status()
-        data = res.json()
-    except Exception as e:
-        return None, f"Nano Banana Pro 호출 실패: {e}"
+    api_url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-3-pro-image-preview:generateContent"
+    )
+    image_b64 = base64.b64encode(image_png_bytes).decode("utf-8")
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt_text},
+                    {
+                        "inlineData": {
+                            "mimeType": "image/png",
+                            "data": image_b64,
+                        }
+                    },
+                ]
+            }
+        ],
+        "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+    }
+
+    data = None
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            res = requests.post(
+                api_url, params={"key": gemini_api_key}, json=payload, timeout=90
+            )
+            if res.status_code == 429:
+                last_err = (
+                    "요청량 제한(429)에 걸렸습니다. 잠시 후 자동으로 재시도합니다. "
+                    "(계속 반복되면 해당 Google API 키의 결제 계정 연결/요금제를 확인해주세요.)"
+                )
+                time.sleep(15 * (attempt + 1))
+                continue
+            res.raise_for_status()
+            data = res.json()
+            break
+        except Exception as e:
+            last_err = f"Nano Banana Pro 호출 실패: {e}"
+            break
+
+    if data is None:
+        return None, last_err or "요청에 실패했습니다."
 
     try:
         parts = data["candidates"][0]["content"]["parts"]
@@ -1812,7 +1828,7 @@ with tab5:
                 value=st.session_state["banner_colors"][i],
                 key=f"banner_color_{i}",
                 label_visibility="collapsed",
-                placeholder="예: yellow / pink / navy",
+                placeholder="예: 빨강 / 핑크 / 네이비",
             )
         with col_del:
             if st.button(
@@ -1850,7 +1866,9 @@ with tab5:
                     image_png_bytes = None
 
                 if image_png_bytes:
-                    for color in colors:
+                    for idx, color in enumerate(colors):
+                        if idx > 0:
+                            time.sleep(3)
                         with st.spinner(f"'{color}' 배너컷 생성 중..."):
                             prompt_text = BANNER_STUDIO_WHITE_TEMPLATE.format(
                                 color=color
