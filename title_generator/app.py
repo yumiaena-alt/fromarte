@@ -153,7 +153,7 @@ BANNER_STUDIO_WHITE_TEMPLATE = (
 
 
 def fetch_gemini_banner_image(image_png_bytes, prompt_text, max_retries=3):
-    """Nano Banana Pro(gemini-3-pro-image-preview)로 배너컷 이미지를 생성한다."""
+    """Nano Banana Pro(gemini-3-pro-image)로 배너컷 이미지를 생성한다."""
     gemini_api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
         "GEMINI_API_KEY"
     )
@@ -162,7 +162,7 @@ def fetch_gemini_banner_image(image_png_bytes, prompt_text, max_retries=3):
 
     api_url = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-3-pro-image-preview:generateContent"
+        "gemini-3-pro-image:generateContent"
     )
     image_b64 = base64.b64encode(image_png_bytes).decode("utf-8")
     payload = {
