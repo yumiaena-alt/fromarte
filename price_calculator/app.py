@@ -183,6 +183,60 @@ BANNER_STUDIO_WHITE_GROUP_TEMPLATE = (
     "1000x1000 format."
 )
 
+BANNER_MOOD_TEMPLATE = (
+    "Create a professional lifestyle product photograph of ONLY the "
+    "[{color}] version of the product shown in the attached reference photo. "
+    "Preserve the product's exact shape, proportions, materials, textures, "
+    "stitching, printed logos, and any text exactly as photographed — do not "
+    "redesign, distort, or reinterpret the product in any way. Remove all other "
+    "color variants and any other objects from the frame, keeping only this one "
+    "product. Place the product in a tasteful, atmospheric setting that "
+    "naturally complements its style and color — choose whichever mood best "
+    "suits this specific product, such as a warm wood-toned interior, a soft "
+    "natural outdoor scene, a minimal café-like ambience, or a similar "
+    "lifestyle backdrop. Frame the product centered at the same scale, angle, "
+    "and orientation as it appears in the reference photo, with balanced "
+    "negative space around it. Use soft, natural-looking lighting with gentle "
+    "highlights and a subtle shadow grounding the product in the scene. The "
+    "final image should look like an actual high-end commercial lifestyle "
+    "photograph shot on a professional camera — sharp focus, accurate colors, "
+    "no AI-generation artifacts, no warped or melted details, no blurred or "
+    "garbled logos or text. Square 1000x1000 format."
+)
+
+BANNER_MOOD_GROUP_TEMPLATE = (
+    "Create a professional lifestyle product photograph showing the "
+    "{colors} versions of the product from the attached reference photo, "
+    "displayed together as a matching set. Preserve each item's exact shape, "
+    "proportions, materials, textures, stitching, printed logos, and any text "
+    "exactly as photographed — do not redesign, distort, or reinterpret any of "
+    "them. Place them together in a tasteful, atmospheric setting that "
+    "naturally complements their style and colors — choose whichever mood "
+    "best suits this product line, such as a warm wood-toned interior, a soft "
+    "natural outdoor scene, a minimal café-like ambience, or a similar "
+    "lifestyle backdrop. Arrange them neatly together, centered in the frame "
+    "with balanced negative space, at a consistent scale and angle matching "
+    "the reference photo. Use soft, natural-looking lighting with gentle "
+    "highlights and subtle shadows grounding the products in the scene. The "
+    "final image should look like an actual high-end commercial lifestyle "
+    "photograph shot on a professional camera — sharp focus, accurate colors, "
+    "no AI-generation artifacts, no warped or melted details, no blurred or "
+    "garbled logos or text. Square 1000x1000 format."
+)
+
+BANNER_STYLE_OPTIONS = {
+    "🤍 스튜디오 화이트 누끼 (기본)": {
+        "tag": "studio_white",
+        "template": BANNER_STUDIO_WHITE_TEMPLATE,
+        "group_template": BANNER_STUDIO_WHITE_GROUP_TEMPLATE,
+    },
+    "🎨 무드 배경 (AI 자동 연출)": {
+        "tag": "mood",
+        "template": BANNER_MOOD_TEMPLATE,
+        "group_template": BANNER_MOOD_GROUP_TEMPLATE,
+    },
+}
+
 
 def _join_colors_for_prompt(colors):
     if len(colors) == 1:
@@ -1923,16 +1977,29 @@ with tab4:
 # ==================================================================
 with tab5:
     st.subheader("🎯 배너컷 생성기 (Nano Banana)")
+
+    style_col, model_col = st.columns(2)
+    with style_col:
+        banner_style_label = st.selectbox(
+            "배너 스타일 선택",
+            list(BANNER_STYLE_OPTIONS.keys()),
+            index=0,
+            key="banner_style_select",
+        )
+    banner_style = BANNER_STYLE_OPTIONS[banner_style_label]
+
     st.caption(
-        "여러 컬러가 모여있는 상품 모듬 사진을 올리면, 컬러별로 스튜디오 화이트 누끼 배너컷을 만들어줍니다."
+        f"여러 컬러가 모여있는 상품 모듬 사진을 올리면, 컬러별로 "
+        f"{banner_style_label} 배너컷을 만들어줍니다."
     )
 
-    banner_model_label = st.selectbox(
-        "생성 모델 선택",
-        list(BANNER_MODEL_OPTIONS.keys()),
-        index=0,
-        key="banner_model_select",
-    )
+    with model_col:
+        banner_model_label = st.selectbox(
+            "생성 모델 선택",
+            list(BANNER_MODEL_OPTIONS.keys()),
+            index=0,
+            key="banner_model_select",
+        )
     banner_model_name = BANNER_MODEL_OPTIONS[banner_model_label]
 
     BANNER_EXAMPLE_IMAGE_URL = "https://gi.esmplus.com/fromarte/wholesale/sample.png"
@@ -2043,7 +2110,7 @@ with tab5:
                         if idx > 0:
                             time.sleep(3)
                         with st.spinner(f"'{color}' 배너컷 생성 중..."):
-                            prompt_text = BANNER_STUDIO_WHITE_TEMPLATE.format(
+                            prompt_text = banner_style["template"].format(
                                 color=color
                             )
                             result_bytes, err = fetch_gemini_banner_image(
@@ -2073,7 +2140,7 @@ with tab5:
                             {
                                 "label": f"{color} 배너컷",
                                 "data": jpeg_bytes,
-                                "filename": f"banner_{safe_color}_studio_white.jpg",
+                                "filename": f"banner_{safe_color}_{banner_style['tag']}.jpg",
                             }
                         )
 
@@ -2081,7 +2148,7 @@ with tab5:
                         time.sleep(3)
                         with st.spinner("전체 모듬 배너컷 생성 중..."):
                             group_prompt_text = (
-                                BANNER_STUDIO_WHITE_GROUP_TEMPLATE.format(
+                                banner_style["group_template"].format(
                                     colors=_join_colors_for_prompt(colors)
                                 )
                             )
@@ -2107,7 +2174,7 @@ with tab5:
                                     {
                                         "label": "전체 모듬 배너컷",
                                         "data": group_out_buf.getvalue(),
-                                        "filename": "banner_all_colors_studio_white.jpg",
+                                        "filename": f"banner_all_colors_{banner_style['tag']}.jpg",
                                     }
                                 )
                             except Exception as e:
