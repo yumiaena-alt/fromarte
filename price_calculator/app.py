@@ -153,9 +153,14 @@ BANNER_STUDIO_WHITE_TEMPLATE = (
 
 
 def fetch_gemini_banner_image(image_png_bytes, prompt_text, max_retries=3):
-    """Nano Banana Pro(gemini-3-pro-image)로 배너컷 이미지를 생성한다."""
-    gemini_api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
-        "GEMINI_API_KEY"
+    """Nano Banana Pro(gemini-3-pro-image)로 배너컷 이미지를 생성한다.
+    상품명 작성기(무료 등급)와 과금이 섞이지 않도록, 별도 유료 프로젝트의
+    GEMINI_BANNER_API_KEY를 우선 사용하고 없으면 기존 키로 대체한다."""
+    gemini_api_key = (
+        st.secrets.get("GEMINI_BANNER_API_KEY")
+        or os.environ.get("GEMINI_BANNER_API_KEY")
+        or st.secrets.get("GEMINI_API_KEY")
+        or os.environ.get("GEMINI_API_KEY")
     )
     if not gemini_api_key:
         return None, "GEMINI_API_KEY가 등록되지 않았습니다. Streamlit Secrets 설정을 확인해주세요."
