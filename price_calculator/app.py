@@ -1949,7 +1949,7 @@ with tab5:
                 label_visibility="collapsed",
             )
             st.markdown(
-                '<div style="height:220px;"></div>', unsafe_allow_html=True
+                '<div style="height:250px;"></div>', unsafe_allow_html=True
             )
     with example_col:
         st.markdown(
