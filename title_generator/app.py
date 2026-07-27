@@ -161,8 +161,17 @@ BANNER_STUDIO_WHITE_TEMPLATE = (
 )
 
 
-def fetch_gemini_banner_image(image_png_bytes, prompt_text, max_retries=3):
-    """Nano Banana Pro(gemini-3-pro-image)로 배너컷 이미지를 생성한다.
+BANNER_MODEL_OPTIONS = {
+    "Nano Banana 2 (저렴, 테스트용 추천)": "gemini-3.1-flash-image",
+    "Nano Banana Pro (최고 품질, 고가)": "gemini-3-pro-image",
+    "Nano Banana (가장 저렴)": "gemini-2.5-flash-image",
+}
+
+
+def fetch_gemini_banner_image(
+    image_png_bytes, prompt_text, model_name="gemini-3.1-flash-image", max_retries=3
+):
+    """Nano Banana 계열 모델로 배너컷 이미지를 생성한다.
     상품명 작성기(무료 등급)와 과금이 섞이지 않도록, 별도 유료 프로젝트의
     GEMINI_BANNER_API_KEY를 우선 사용하고 없으면 기존 키로 대체한다."""
     gemini_api_key = (
@@ -175,8 +184,8 @@ def fetch_gemini_banner_image(image_png_bytes, prompt_text, max_retries=3):
         return None, "GEMINI_API_KEY가 등록되지 않았습니다. Streamlit Secrets 설정을 확인해주세요."
 
     api_url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-3-pro-image:generateContent"
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model_name}:generateContent"
     )
     image_b64 = base64.b64encode(image_png_bytes).decode("utf-8")
     payload = {
@@ -214,7 +223,7 @@ def fetch_gemini_banner_image(image_png_bytes, prompt_text, max_retries=3):
             data = res.json()
             break
         except Exception as e:
-            last_err = f"Nano Banana Pro 호출 실패: {e}"
+            last_err = f"{model_name} 호출 실패: {e}"
             break
 
     if data is None:
@@ -1869,10 +1878,18 @@ with tab4:
 # TAB 5: 배너컷 생성기 (Nano Banana Pro)
 # ==================================================================
 with tab5:
-    st.subheader("🎯 배너컷 생성기 (Nano Banana Pro)")
+    st.subheader("🎯 배너컷 생성기 (Nano Banana)")
     st.caption(
         "여러 컬러가 모여있는 상품 모듬 사진을 올리면, 컬러별로 스튜디오 화이트 누끼 배너컷을 만들어줍니다."
     )
+
+    banner_model_label = st.selectbox(
+        "생성 모델 선택",
+        list(BANNER_MODEL_OPTIONS.keys()),
+        index=0,
+        key="banner_model_select",
+    )
+    banner_model_name = BANNER_MODEL_OPTIONS[banner_model_label]
 
     banner_uploaded = st.file_uploader(
         "상품 모듬 사진 업로드", type=["jpg", "jpeg", "png"], key="banner_image_upload"
@@ -1936,7 +1953,7 @@ with tab5:
                                 color=color
                             )
                             result_bytes, err = fetch_gemini_banner_image(
-                                image_png_bytes, prompt_text
+                                image_png_bytes, prompt_text, banner_model_name
                             )
 
                         if err:
