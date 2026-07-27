@@ -1522,6 +1522,12 @@ with tab3:
         "주문제작/AI 안내 하단 배너를 자동으로 합쳐줍니다."
     )
 
+    st.link_button(
+        "🔗 ESM+ 로그인 바로가기",
+        "https://signin.esmplus.com/login",
+        use_container_width=True,
+    )
+
     top_download_slot = st.container()
     st.markdown("---")
 
