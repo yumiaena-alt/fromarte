@@ -1934,7 +1934,7 @@ with tab5:
 
     BANNER_EXAMPLE_IMAGE_URL = "https://gi.esmplus.com/fromarte/wholesale/sample.png"
 
-    upload_col, example_col = st.columns([2, 1])
+    upload_col, example_col = st.columns([3, 1])
     with upload_col:
         banner_uploaded = st.file_uploader(
             "상품 모듬 사진 업로드", type=["jpg", "jpeg", "png"], key="banner_image_upload"
@@ -1943,7 +1943,7 @@ with tab5:
         st.image(
             BANNER_EXAMPLE_IMAGE_URL,
             caption="예시: 이런 식으로 여러 색상이 모여있는 사진을 준비하세요",
-            use_container_width=True,
+            width=200,
         )
 
     if "banner_colors" not in st.session_state:
