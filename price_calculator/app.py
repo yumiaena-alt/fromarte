@@ -7,6 +7,7 @@ import os
 import re
 import time
 import urllib.request
+import zipfile
 
 import bcrypt
 import google.generativeai as genai
@@ -1934,14 +1935,15 @@ with tab5:
     banner_model_name = BANNER_MODEL_OPTIONS[banner_model_label]
 
     BANNER_EXAMPLE_IMAGE_URL = "https://gi.esmplus.com/fromarte/wholesale/sample.png"
+    BANNER_BOX_HEIGHT = 430
 
     st.markdown(
-        """
+        f"""
         <style>
-        div[data-testid="stFileUploaderDropzone"] {
-            min-height: 380px;
+        div[data-testid="stFileUploaderDropzone"] {{
+            min-height: {BANNER_BOX_HEIGHT - 90}px;
             border-radius: 12px;
-        }
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -1959,10 +1961,18 @@ with tab5:
                 label_visibility="collapsed",
             )
     with example_col:
-        st.image(
-            BANNER_EXAMPLE_IMAGE_URL,
-            caption="예시: 이런 식으로 여러 색상이 모여있는 사진을 준비하세요",
-            use_container_width=True,
+        st.markdown(
+            f"""
+            <div style="height:{BANNER_BOX_HEIGHT}px; border-radius:12px;
+                        overflow:hidden; border:1px solid rgba(128,128,128,0.3);">
+                <img src="{BANNER_EXAMPLE_IMAGE_URL}"
+                     style="width:100%; height:100%; object-fit:cover;">
+            </div>
+            <p style="text-align:center; font-size:0.85em; color:gray; margin-top:6px;">
+                예시: 이런 식으로 여러 색상이 모여있는 사진을 준비하세요
+            </p>
+            """,
+            unsafe_allow_html=True,
         )
 
     if "banner_colors" not in st.session_state:
@@ -1997,12 +2007,28 @@ with tab5:
 
     st.markdown("---")
 
-    if st.button(
+    if "banner_generating" not in st.session_state:
+        st.session_state["banner_generating"] = False
+    if "banner_results" not in st.session_state:
+        st.session_state["banner_results"] = []
+
+    generate_clicked = st.button(
         "🎨 배너컷 생성하기",
         key="banner_generate_btn",
         type="primary",
         use_container_width=True,
-    ):
+        disabled=st.session_state["banner_generating"],
+    )
+
+    if st.session_state["banner_generating"]:
+        st.info("⏳ 생성 중입니다. 완료될 때까지 버튼이 비활성화됩니다 (중복 생성 방지).")
+
+    if generate_clicked:
+        st.session_state["banner_generating"] = True
+        st.session_state["banner_results"] = []
+        st.rerun()
+
+    if st.session_state["banner_generating"]:
         if banner_uploaded is None:
             st.warning("⚠️ 먼저 상품 모듬 사진을 업로드해주세요.")
         else:
@@ -2020,6 +2046,7 @@ with tab5:
                     image_png_bytes = None
 
                 if image_png_bytes:
+                    results = []
                     for idx, color in enumerate(colors):
                         if idx > 0:
                             time.sleep(3)
@@ -2044,24 +2071,18 @@ with tab5:
                             )
                             out_buf = io.BytesIO()
                             result_img.save(out_buf, format="JPEG", quality=95)
-                            out_buf.seek(0)
+                            jpeg_bytes = out_buf.getvalue()
                         except Exception as e:
                             st.error(f"❌ '{color}' 이미지 처리 실패: {e}")
                             continue
 
-                        st.image(
-                            result_img,
-                            caption=f"{color} 배너컷",
-                            use_container_width=True,
-                        )
                         safe_color = _safe_filename_token(color, f"color{idx + 1}")
-                        st.download_button(
-                            f"📥 {color} 배너컷 다운로드",
-                            data=out_buf,
-                            file_name=f"banner_{safe_color}_studio_white.jpg",
-                            mime="image/jpeg",
-                            key=f"banner_download_{idx}",
-                            use_container_width=True,
+                        results.append(
+                            {
+                                "label": f"{color} 배너컷",
+                                "data": jpeg_bytes,
+                                "filename": f"banner_{safe_color}_studio_white.jpg",
+                            }
                         )
 
                     if len(colors) > 1:
@@ -2090,22 +2111,51 @@ with tab5:
                                 group_img.save(
                                     group_out_buf, format="JPEG", quality=95
                                 )
-                                group_out_buf.seek(0)
+                                results.append(
+                                    {
+                                        "label": "전체 모듬 배너컷",
+                                        "data": group_out_buf.getvalue(),
+                                        "filename": "banner_all_colors_studio_white.jpg",
+                                    }
+                                )
                             except Exception as e:
                                 st.error(f"❌ 전체 모듬 이미지 처리 실패: {e}")
-                                group_img = None
 
-                            if group_img is not None:
-                                st.image(
-                                    group_img,
-                                    caption="전체 모듬 배너컷",
-                                    use_container_width=True,
-                                )
-                                st.download_button(
-                                    "📥 전체 모듬 배너컷 다운로드",
-                                    data=group_out_buf,
-                                    file_name="banner_all_colors_studio_white.jpg",
-                                    mime="image/jpeg",
-                                    key="banner_download_group",
-                                    use_container_width=True,
-                                )
+                    st.session_state["banner_results"] = results
+
+        st.session_state["banner_generating"] = False
+        st.rerun()
+
+    banner_results = st.session_state["banner_results"]
+    if banner_results:
+        st.markdown("---")
+        st.success(f"✅ 총 {len(banner_results)}장 생성 완료!")
+
+        for i, item in enumerate(banner_results):
+            st.image(
+                item["data"], caption=item["label"], use_container_width=True
+            )
+            st.download_button(
+                f"📥 {item['label']} 다운로드",
+                data=item["data"],
+                file_name=item["filename"],
+                mime="image/jpeg",
+                key=f"banner_download_{i}",
+                use_container_width=True,
+            )
+
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for item in banner_results:
+                zf.writestr(item["filename"], item["data"])
+        zip_buf.seek(0)
+
+        st.download_button(
+            "📦 전체 한꺼번에 다운로드 (ZIP)",
+            data=zip_buf,
+            file_name="banner_cuts_all.zip",
+            mime="application/zip",
+            key="banner_download_zip",
+            type="primary",
+            use_container_width=True,
+        )
