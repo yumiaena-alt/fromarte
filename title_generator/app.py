@@ -138,6 +138,72 @@ def fetch_naver_api_price(smartstore_url):
     return None, "네이버 API 응답에 판매가 정보가 없습니다.", has_option_price
 
 
+BANNER_STUDIO_WHITE_TEMPLATE = (
+    "Generate a professional studio product photo of ONLY the [{color}] version of "
+    "the product shown in the attached photo, preserving its exact shape, materials, "
+    "and design exactly as photographed — do not alter or reinterpret the "
+    "product itself. Remove all other color variants and objects from the frame. "
+    "Photograph it on a seamless white studio floor with soft directional lighting "
+    "that creates gentle highlights and depth, plus a subtle soft reflection of the "
+    "product on the glossy floor beneath it and a soft naturally-falling shadow. "
+    "Avoid a flat cut-out sticker look — it should look like a real, premium "
+    "commercial product photograph similar to luxury brand photography. Square "
+    "1000x1000 format."
+)
+
+
+def fetch_gemini_banner_image(image_png_bytes, prompt_text):
+    """Nano Banana Pro(gemini-3-pro-image-preview)로 배너컷 이미지를 생성한다."""
+    gemini_api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get(
+        "GEMINI_API_KEY"
+    )
+    if not gemini_api_key:
+        return None, "GEMINI_API_KEY가 등록되지 않았습니다. Streamlit Secrets 설정을 확인해주세요."
+
+    try:
+        api_url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-3-pro-image-preview:generateContent"
+        )
+        image_b64 = base64.b64encode(image_png_bytes).decode("utf-8")
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": prompt_text},
+                        {
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": image_b64,
+                            }
+                        },
+                    ]
+                }
+            ],
+            "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+        }
+        res = requests.post(
+            api_url, params={"key": gemini_api_key}, json=payload, timeout=90
+        )
+        res.raise_for_status()
+        data = res.json()
+    except Exception as e:
+        return None, f"Nano Banana Pro 호출 실패: {e}"
+
+    try:
+        parts = data["candidates"][0]["content"]["parts"]
+        for part in parts:
+            inline = part.get("inlineData")
+            if inline and inline.get("data"):
+                return base64.b64decode(inline["data"]), None
+    except Exception:
+        pass
+    return (
+        None,
+        "응답에서 생성된 이미지를 찾지 못했습니다. (안전 필터에 의해 차단되었을 수 있습니다)",
+    )
+
+
 def _parse_text_align(raw_html):
     # 사용자 요청에 따라 원본 정렬과 상관없이 항상 중앙정렬로 렌더링한다.
     return "center"
@@ -733,12 +799,13 @@ def check_prohibited_terms(text):
 # 상단 탭 분리 (1. Title Generator / 2. 마켓별 판매가 계산기 / 3. 상세페이지 합치기
 # / 4. 도매마켓 바로가기)
 # ------------------------------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs(
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
         "🏷️ 상품명 작성기",
         "💰 마켓별 판매가 계산기",
         "🖼️ 상세페이지 합치기",
         "🔗 도매마켓 바로가기",
+        "🎯 배너컷 생성기",
     ]
 )
 
@@ -1719,3 +1786,107 @@ with tab4:
 
     for name, url in WHOLESALE_SITES:
         st.link_button(f"🔗 {name}", url, use_container_width=True)
+
+# ==================================================================
+# TAB 5: 배너컷 생성기 (Nano Banana Pro)
+# ==================================================================
+with tab5:
+    st.subheader("🎯 배너컷 생성기 (Nano Banana Pro)")
+    st.caption(
+        "여러 컬러가 모여있는 상품 모듬 사진을 올리면, 컬러별로 스튜디오 화이트 누끼 배너컷을 만들어줍니다."
+    )
+
+    banner_uploaded = st.file_uploader(
+        "상품 모듬 사진 업로드", type=["jpg", "jpeg", "png"], key="banner_image_upload"
+    )
+
+    if "banner_colors" not in st.session_state:
+        st.session_state["banner_colors"] = [""]
+
+    st.markdown("**색상 목록** (제품에 있는 색상 수만큼 추가/삭제하세요)")
+    for i in range(len(st.session_state["banner_colors"])):
+        col_input, col_del = st.columns([4, 1])
+        with col_input:
+            st.session_state["banner_colors"][i] = st.text_input(
+                f"색상 {i + 1}",
+                value=st.session_state["banner_colors"][i],
+                key=f"banner_color_{i}",
+                label_visibility="collapsed",
+                placeholder="예: yellow / pink / navy",
+            )
+        with col_del:
+            if st.button(
+                "삭제", key=f"banner_color_del_{i}", use_container_width=True
+            ):
+                st.session_state["banner_colors"].pop(i)
+                st.rerun()
+
+    if st.button("➕ 색상 추가", key="banner_color_add"):
+        st.session_state["banner_colors"].append("")
+        st.rerun()
+
+    st.markdown("---")
+
+    if st.button(
+        "🎨 배너컷 생성하기",
+        key="banner_generate_btn",
+        type="primary",
+        use_container_width=True,
+    ):
+        if banner_uploaded is None:
+            st.warning("⚠️ 먼저 상품 모듬 사진을 업로드해주세요.")
+        else:
+            colors = [c.strip() for c in st.session_state["banner_colors"] if c.strip()]
+            if not colors:
+                st.warning("⚠️ 색상을 최소 1개 이상 입력해주세요.")
+            else:
+                try:
+                    source_img = Image.open(banner_uploaded).convert("RGB")
+                    png_buf = io.BytesIO()
+                    source_img.save(png_buf, format="PNG")
+                    image_png_bytes = png_buf.getvalue()
+                except Exception as e:
+                    st.error(f"❌ 업로드한 이미지를 읽지 못했습니다: {e}")
+                    image_png_bytes = None
+
+                if image_png_bytes:
+                    for color in colors:
+                        with st.spinner(f"'{color}' 배너컷 생성 중..."):
+                            prompt_text = BANNER_STUDIO_WHITE_TEMPLATE.format(
+                                color=color
+                            )
+                            result_bytes, err = fetch_gemini_banner_image(
+                                image_png_bytes, prompt_text
+                            )
+
+                        if err:
+                            st.error(f"❌ '{color}' 생성 실패: {err}")
+                            continue
+
+                        try:
+                            result_img = Image.open(io.BytesIO(result_bytes)).convert(
+                                "RGB"
+                            )
+                            result_img = result_img.resize(
+                                (1000, 1000), Image.LANCZOS
+                            )
+                            out_buf = io.BytesIO()
+                            result_img.save(out_buf, format="JPEG", quality=95)
+                            out_buf.seek(0)
+                        except Exception as e:
+                            st.error(f"❌ '{color}' 이미지 처리 실패: {e}")
+                            continue
+
+                        st.image(
+                            result_img,
+                            caption=f"{color} 배너컷",
+                            use_container_width=True,
+                        )
+                        st.download_button(
+                            f"📥 {color} 배너컷 다운로드",
+                            data=out_buf,
+                            file_name=f"banner_{color}_studio_white.jpg",
+                            mime="image/jpeg",
+                            key=f"banner_download_{color}",
+                            use_container_width=True,
+                        )
