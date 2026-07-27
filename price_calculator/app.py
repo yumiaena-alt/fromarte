@@ -1573,6 +1573,7 @@ with tab3:
 
     detail_ai_used = st.checkbox(
         "🤖 이 상세페이지 제작에 AI를 활용했나요? (체크 시 하단에 AI 활용 안내 문구가 자동으로 추가됩니다)",
+        value=True,
         key="detail_ai_used",
     )
 
