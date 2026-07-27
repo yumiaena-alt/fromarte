@@ -14,6 +14,7 @@ import google.generativeai as genai
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from bs4 import BeautifulSoup
 from PIL import Image, ImageDraw, ImageFont
 
@@ -2113,6 +2114,7 @@ with tab5:
                                 st.error(f"❌ 전체 모듬 이미지 처리 실패: {e}")
 
                     st.session_state["banner_results"] = results
+                    st.session_state["banner_just_generated"] = True
 
         st.session_state["banner_generating"] = False
         st.rerun()
@@ -2139,11 +2141,26 @@ with tab5:
         with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
             for item in banner_results:
                 zf.writestr(item["filename"], item["data"])
-        zip_buf.seek(0)
+        zip_bytes = zip_buf.getvalue()
+
+        if st.session_state.get("banner_just_generated"):
+            zip_b64 = base64.b64encode(zip_bytes).decode("utf-8")
+            components.html(
+                f"""
+                <a id="banner_auto_dl" style="display:none"
+                   href="data:application/zip;base64,{zip_b64}"
+                   download="banner_cuts_all.zip"></a>
+                <script>
+                document.getElementById('banner_auto_dl').click();
+                </script>
+                """,
+                height=0,
+            )
+            st.session_state["banner_just_generated"] = False
 
         st.download_button(
             "📦 전체 한꺼번에 다운로드 (ZIP)",
-            data=zip_buf,
+            data=zip_bytes,
             file_name="banner_cuts_all.zip",
             mime="application/zip",
             key="banner_download_zip",
