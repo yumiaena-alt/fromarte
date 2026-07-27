@@ -425,6 +425,25 @@ def _get_korean_font(size):
     return ImageFont.load_default()
 
 
+def render_ai_notice_banner(
+    width,
+    text="본 상세페이지는 AI를 활용해 제작되었습니다.",
+    height=60,
+    font_size=22,
+    bg_color=(245, 245, 245),
+    text_color=(90, 90, 90),
+):
+    """상세페이지 하단에 붙일 AI 활용 안내 문구 배너를 생성한다."""
+    banner = Image.new("RGB", (width, height), bg_color)
+    draw = ImageDraw.Draw(banner)
+    font = _get_korean_font(font_size)
+    text_width = draw.textlength(text, font=font)
+    x = max((width - text_width) / 2, 0)
+    y = (height - font_size) / 2
+    draw.text((x, y), text, font=font, fill=text_color)
+    return banner
+
+
 def _wrap_text_lines(draw, text, font, max_width, max_chars=15):
     lines = []
     for paragraph in text.split("\n"):
@@ -829,12 +848,12 @@ def check_prohibited_terms(text):
 # 상단 탭 분리 (1. Title Generator / 2. 마켓별 판매가 계산기 / 3. 상세페이지 합치기
 # / 4. 도매마켓 바로가기)
 # ------------------------------------------------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab4, tab1, tab2, tab3, tab5 = st.tabs(
     [
+        "🔗 도매마켓 바로가기",
         "🏷️ 상품명 작성기",
         "💰 마켓별 판매가 계산기",
         "🖼️ 상세페이지 합치기",
-        "🔗 도매마켓 바로가기",
         "🎯 배너컷 생성기",
     ]
 )
@@ -1502,6 +1521,11 @@ with tab3:
         key="detail_input_method",
     )
 
+    detail_ai_used = st.checkbox(
+        "🤖 이 상세페이지 제작에 AI를 활용했나요? (체크 시 하단에 AI 활용 안내 문구가 자동으로 추가됩니다)",
+        key="detail_ai_used",
+    )
+
     main_img = None
     source_name = "detail_page"
 
@@ -1740,11 +1764,20 @@ with tab3:
                 (main_width, new_footer_height), Image.Resampling.LANCZOS
             )
 
-            total_height = main_height + new_footer_height
+            ai_notice_img = (
+                render_ai_notice_banner(main_width) if detail_ai_used else None
+            )
+            ai_notice_height = ai_notice_img.size[1] if ai_notice_img else 0
+
+            total_height = main_height + new_footer_height + ai_notice_height
             combined_img = Image.new("RGB", (main_width, total_height))
 
             combined_img.paste(main_img, (0, 0))
             combined_img.paste(resized_footer, (0, main_height))
+            if ai_notice_img is not None:
+                combined_img.paste(
+                    ai_notice_img, (0, main_height + new_footer_height)
+                )
 
             st.success("✅ 하단 배너 합성이 완료되었습니다!")
 
