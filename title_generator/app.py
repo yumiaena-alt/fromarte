@@ -139,15 +139,24 @@ def fetch_naver_api_price(smartstore_url):
 
 
 BANNER_STUDIO_WHITE_TEMPLATE = (
-    "Generate a professional studio product photo of ONLY the [{color}] version of "
-    "the product shown in the attached photo, preserving its exact shape, materials, "
-    "and design exactly as photographed — do not alter or reinterpret the "
-    "product itself. Remove all other color variants and objects from the frame. "
-    "Photograph it on a seamless white studio floor with soft directional lighting "
-    "that creates gentle highlights and depth, plus a subtle soft reflection of the "
-    "product on the glossy floor beneath it and a soft naturally-falling shadow. "
-    "Avoid a flat cut-out sticker look — it should look like a real, premium "
-    "commercial product photograph similar to luxury brand photography. Square "
+    "Create a professional e-commerce studio product photograph of ONLY the "
+    "[{color}] version of the product shown in the attached reference photo. "
+    "Preserve the product's exact shape, proportions, materials, textures, "
+    "stitching, printed logos, and any text exactly as photographed — do not "
+    "redesign, distort, or reinterpret the product in any way. Remove all other "
+    "color variants and any other objects from the frame, keeping only this one "
+    "product. Frame the product centered at the same scale, angle, and "
+    "orientation as it appears in the reference photo, with balanced negative "
+    "space around it (the product should occupy roughly 60-70% of the frame, "
+    "not touching the edges). Light it with a classic three-point studio setup: "
+    "a large soft key light from the upper left, a gentle fill light to soften "
+    "shadows, and a subtle rim light separating the product from the "
+    "background. Place it on a seamless, glossy white studio floor with a soft, "
+    "realistic reflection of the product fading toward the bottom, and a soft "
+    "naturally-falling contact shadow. The final image should look like an "
+    "actual high-end commercial product photograph shot on a professional "
+    "camera — sharp focus, accurate colors, no AI-generation artifacts, no "
+    "warped or melted details, no blurred or garbled logos or text. Square "
     "1000x1000 format."
 )
 
