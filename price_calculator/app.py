@@ -1935,15 +1935,29 @@ with tab5:
 
     BANNER_EXAMPLE_IMAGE_URL = "https://gi.esmplus.com/fromarte/wholesale/sample.png"
 
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stFileUploaderDropzone"] {
+            min-height: 380px;
+            border-radius: 12px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     upload_col, example_col = st.columns([1, 1])
     with upload_col:
-        st.caption("📁 아래 영역으로 사진을 끌어다 놓거나(드래그 앤 드롭), 클릭해서 파일을 선택하세요.")
-        banner_uploaded = st.file_uploader(
-            "상품 모듬 사진 업로드",
-            type=["jpg", "jpeg", "png"],
-            key="banner_image_upload",
-            label_visibility="collapsed",
-        )
+        with st.container(border=True):
+            st.markdown("**📁 여기에 사진을 끌어다 놓으세요**")
+            st.caption("드래그 앤 드롭으로 올리거나, 클릭해서 파일을 선택할 수 있습니다.")
+            banner_uploaded = st.file_uploader(
+                "상품 모듬 사진 업로드",
+                type=["jpg", "jpeg", "png"],
+                key="banner_image_upload",
+                label_visibility="collapsed",
+            )
     with example_col:
         st.image(
             BANNER_EXAMPLE_IMAGE_URL,
