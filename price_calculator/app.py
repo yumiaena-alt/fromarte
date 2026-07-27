@@ -1700,20 +1700,21 @@ with tab4:
     st.subheader("🔗 도매마켓 사이트 바로가기")
     st.caption("클릭하면 새 탭에서 해당 사이트가 열립니다.")
 
+    st.link_button(
+        "📄 입점마켓 정리시트 바로가기 (로그인 정보 공유 시트)",
+        "https://docs.google.com/spreadsheets/d/10jJhEgwmLQYiORCFynlpvN1G5B9Zq2S-gY8Me-wduG0/edit?usp=sharing",
+        use_container_width=True,
+    )
+    st.markdown("---")
+
     WHOLESALE_SITES = [
         ("오너클랜 공급사", "https://ownerclan.com/vender/"),
         ("도매매", "https://www.domeggook.com/sc/"),
         ("셀링콕", "https://www.sellingkok.com/"),
-        ("도매창고", "https://www.wholesaledepot.co.kr/join"),
-        (
-            "도매의신",
-            "https://www.domesin.com/index.html?p=member/regist_agreement.html",
-        ),
-        (
-            "K셀러",
-            "https://www.kseller.kr/index.php?vhtml=mb/regist_agreement.php",
-        ),
-        ("투비즈온", "http://www.tobizon.co.kr/mall/member/agreement.php"),
+        ("도매창고", "https://www.wholesaledepot.co.kr/wms"),
+        ("도매의신", "https://www.domesin.com/scm/login.html"),
+        ("K셀러", "https://www.kseller.kr/index.php?vhtml=mb/login_form"),
+        ("투비즈온", "https://www.tobizon.co.kr/scm/goods/goods_list.php"),
     ]
 
     for name, url in WHOLESALE_SITES:
