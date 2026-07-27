@@ -1710,7 +1710,7 @@ with tab4:
     WHOLESALE_SITES = [
         ("오너클랜 공급사", "https://ownerclan.com/vender/"),
         ("도매매", "https://www.domeggook.com/sc/"),
-        ("셀링콕", "https://www.sellingkok.com/"),
+        ("셀링콕", "https://www.sellingkok.com/shop/partner/"),
         ("도매창고", "https://www.wholesaledepot.co.kr/wms"),
         ("도매의신", "https://www.domesin.com/scm/login.html"),
         ("K셀러", "https://www.kseller.kr/index.php?vhtml=mb/login_form"),
