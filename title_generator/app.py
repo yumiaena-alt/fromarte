@@ -1937,18 +1937,6 @@ with tab5:
     BANNER_EXAMPLE_IMAGE_URL = "https://gi.esmplus.com/fromarte/wholesale/sample.png"
     BANNER_BOX_HEIGHT = 430
 
-    st.markdown(
-        f"""
-        <style>
-        div[data-testid="stFileUploaderDropzone"] {{
-            min-height: {BANNER_BOX_HEIGHT - 90}px;
-            border-radius: 12px;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
     upload_col, example_col = st.columns([1, 1])
     with upload_col:
         with st.container(border=True):
@@ -1959,6 +1947,9 @@ with tab5:
                 type=["jpg", "jpeg", "png"],
                 key="banner_image_upload",
                 label_visibility="collapsed",
+            )
+            st.markdown(
+                '<div style="height:220px;"></div>', unsafe_allow_html=True
             )
     with example_col:
         st.markdown(
