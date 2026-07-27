@@ -1933,16 +1933,21 @@ with tab5:
     if "banner_colors" not in st.session_state:
         st.session_state["banner_colors"] = [""]
 
+    BANNER_COLOR_PLACEHOLDER_EXAMPLES = ["베이지", "네이비", "그레이", "브라운"]
+
     st.markdown("**색상 목록** (제품에 있는 색상 수만큼 추가/삭제하세요)")
     for i in range(len(st.session_state["banner_colors"])):
         col_input, col_del = st.columns([4, 1])
         with col_input:
+            example_color = BANNER_COLOR_PLACEHOLDER_EXAMPLES[
+                i % len(BANNER_COLOR_PLACEHOLDER_EXAMPLES)
+            ]
             st.session_state["banner_colors"][i] = st.text_input(
                 f"색상 {i + 1}",
                 value=st.session_state["banner_colors"][i],
                 key=f"banner_color_{i}",
                 label_visibility="collapsed",
-                placeholder="예: 빨강 / 핑크 / 네이비",
+                placeholder=f"예: {example_color}",
             )
         with col_del:
             if st.button(
