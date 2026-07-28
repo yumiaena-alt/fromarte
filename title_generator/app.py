@@ -1411,9 +1411,11 @@ with tab2:
         )
 
     with col2:
-        if smartstore_url:
+        if smartstore_url and st.session_state.get(
+            "_last_db_smartstore_url"
+        ) != smartstore_url:
+            st.session_state["_last_db_smartstore_url"] = smartstore_url
             st.session_state["price_url_input"] = smartstore_url
-        _sync_shared_url("price_url_input")
 
         if not st.session_state.get("price_url_input", "").strip():
             st.warning("⚠️ 스마트스토어 주소가 없습니다! (붙여넣기)")
