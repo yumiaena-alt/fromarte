@@ -44,6 +44,20 @@ st.write("원하시는 기능을 상단 탭에서 선택하여 사용하세요."
 # ------------------------------------------------------------------
 
 
+def _naver_proxies():
+    """네이버 API 호출을 고정 IP 서버(프록시)를 거쳐 보내기 위한 설정.
+
+    Streamlit Cloud의 외부 IP는 재배포마다 바뀌어서 네이버 API의
+    'API호출 IP' 허용목록을 계속 갱신해야 했다. PROXY_URL이 등록되어
+    있으면 그 서버를 경유해 항상 같은 IP로 나가고, 없으면 기존처럼
+    직접 호출한다.
+    """
+    proxy_url = st.secrets.get("PROXY_URL") or os.environ.get("PROXY_URL")
+    if not proxy_url:
+        return None
+    return {"http": proxy_url, "https": proxy_url}
+
+
 def _get_naver_commerce_token():
     """네이버 커머스 API OAuth2 access token 발급 (실패 사유를 함께 반환)."""
     client_id = st.secrets.get("NAVER_CLIENT_ID") or os.environ.get(
@@ -74,7 +88,9 @@ def _get_naver_commerce_token():
             "grant_type": "client_credentials",
             "type": "SELF",
         }
-        token_res = requests.post(token_url, data=token_data, timeout=10)
+        token_res = requests.post(
+            token_url, data=token_data, timeout=10, proxies=_naver_proxies()
+        )
         access_token = token_res.json().get("access_token")
         if not access_token:
             return None, f"토큰 발급 실패: {token_res.text}"
@@ -125,7 +141,9 @@ def fetch_naver_api_price(smartstore_url):
     try:
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
-        res = requests.get(api_url, headers=headers, timeout=10)
+        res = requests.get(
+            api_url, headers=headers, timeout=10, proxies=_naver_proxies()
+        )
         res.raise_for_status()
         data = res.json()
     except Exception as e:
@@ -441,7 +459,9 @@ def fetch_naver_product_detail_segments(smartstore_url):
     try:
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
-        res = requests.get(api_url, headers=headers, timeout=15)
+        res = requests.get(
+            api_url, headers=headers, timeout=15, proxies=_naver_proxies()
+        )
         res.raise_for_status()
         data = res.json()
     except Exception as e:
@@ -479,7 +499,9 @@ def fetch_naver_product_name(smartstore_url):
     try:
         api_url = f"https://api.commerce.naver.com/external/v2/products/channel-products/{product_id}"
         headers = {"Authorization": f"Bearer {access_token}"}
-        res = requests.get(api_url, headers=headers, timeout=15)
+        res = requests.get(
+            api_url, headers=headers, timeout=15, proxies=_naver_proxies()
+        )
         res.raise_for_status()
         data = res.json()
     except Exception as e:
@@ -725,6 +747,7 @@ def fetch_naver_related_keywords(seed_keyword):
             headers=headers,
             params=params,
             timeout=10,
+            proxies=_naver_proxies(),
         )
     except Exception as e:
         return None, f"네이버 키워드 API 요청 자체가 실패했습니다: {e}"
@@ -1590,33 +1613,47 @@ with tab3:
     st.markdown("---")
 
     @st.cache_data(ttl=300)
-    def get_outbound_ip():
+    def get_outbound_ip(use_proxy):
+        """네이버 API 입장에서 보이는 실제 발신 IP를 조회한다."""
         try:
-            res = requests.get("https://api.ipify.org", timeout=5)
+            res = requests.get(
+                "https://api.ipify.org",
+                timeout=10,
+                proxies=_naver_proxies() if use_proxy else None,
+            )
             return res.text.strip()
         except Exception:
             return None
 
-    _outbound_ip = get_outbound_ip()
-    if _outbound_ip:
-        st.info(
-            f"🔧 현재 서버 외부 IP: `{_outbound_ip}` — 네이버 커머스 API "
-            "애플리케이션의 'API호출 IP' 설정에 이 값을 등록하세요. "
-            "(Streamlit Cloud 서버 IP는 재배포/재시작 시 바뀔 수 있습니다)"
+    _using_proxy = _naver_proxies() is not None
+    _outbound_ip = get_outbound_ip(_using_proxy)
+    if _outbound_ip and _using_proxy:
+        st.success(
+            f"✅ 고정 IP 프록시 사용 중 — 네이버에는 항상 `{_outbound_ip}` 로 "
+            "요청이 나갑니다. 이 값이 커머스 API의 'API호출 IP'에 등록되어 "
+            "있으면 재배포와 상관없이 계속 작동합니다."
         )
-        ip_link_col1, ip_link_col2 = st.columns(2)
-        with ip_link_col1:
-            st.link_button(
-                "🔗 네이버 커머스 API 센터 바로가기",
-                "https://apicenter.commerce.naver.com",
-                use_container_width=True,
-            )
-        with ip_link_col2:
-            st.link_button(
-                "🔗 네이버 광고주센터 바로가기",
-                "https://ads.naver.com/",
-                use_container_width=True,
-            )
+    elif _outbound_ip:
+        st.warning(
+            f"⚠️ 프록시 미사용 — 현재 발신 IP는 `{_outbound_ip}` 입니다. "
+            "네이버 커머스 API의 'API호출 IP'에 이 값을 등록해야 하지만, "
+            "이 IP는 재배포/재시작 시 바뀝니다. (Secrets에 PROXY_URL을 "
+            "등록하면 고정 IP로 전환됩니다)"
+        )
+
+    ip_link_col1, ip_link_col2 = st.columns(2)
+    with ip_link_col1:
+        st.link_button(
+            "🔗 네이버 커머스 API 센터 바로가기",
+            "https://apicenter.commerce.naver.com",
+            use_container_width=True,
+        )
+    with ip_link_col2:
+        st.link_button(
+            "🔗 네이버 광고주센터 바로가기",
+            "https://ads.naver.com/",
+            use_container_width=True,
+        )
 
     DETAIL_FOOTER_URL = "https://gi.esmplus.com/fromarte/wholesale/order.png"
 
