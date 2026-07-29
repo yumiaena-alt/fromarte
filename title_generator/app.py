@@ -1614,19 +1614,22 @@ with tab3:
 
     @st.cache_data(ttl=300)
     def get_outbound_ip(use_proxy):
-        """네이버 API 입장에서 보이는 실제 발신 IP를 조회한다."""
+        """네이버 API 입장에서 보이는 실제 발신 IP를 조회한다.
+        실패 사유를 함께 반환해 원인이 숨지 않게 한다."""
         try:
             res = requests.get(
                 "https://api.ipify.org",
                 timeout=10,
                 proxies=_naver_proxies() if use_proxy else None,
             )
-            return res.text.strip()
-        except Exception:
-            return None
+            res.raise_for_status()
+            return res.text.strip(), None
+        except Exception as e:
+            return None, str(e)
 
     _using_proxy = _naver_proxies() is not None
-    _outbound_ip = get_outbound_ip(_using_proxy)
+    _outbound_ip, _ip_err = get_outbound_ip(_using_proxy)
+
     if _outbound_ip and _using_proxy:
         st.success(
             f"✅ 고정 IP 프록시 사용 중 — 네이버에는 항상 `{_outbound_ip}` 로 "
@@ -1640,6 +1643,16 @@ with tab3:
             "이 IP는 재배포/재시작 시 바뀝니다. (Secrets에 PROXY_URL을 "
             "등록하면 고정 IP로 전환됩니다)"
         )
+    elif _using_proxy:
+        st.error(
+            "❌ 프록시 서버에 연결하지 못했습니다. 네이버 API 호출도 함께 "
+            "실패합니다.\n\n"
+            "확인할 것: ① Secrets의 PROXY_URL 형식/비밀번호 ② 프록시 서버의 "
+            "8888 포트가 외부에 열려 있는지 ③ 서버가 켜져 있는지\n\n"
+            f"오류 내용: `{_ip_err}`"
+        )
+    else:
+        st.warning(f"⚠️ 발신 IP를 확인하지 못했습니다. (오류: `{_ip_err}`)")
 
     ip_link_col1, ip_link_col2 = st.columns(2)
     with ip_link_col1:
