@@ -1604,6 +1604,19 @@ with tab3:
             "애플리케이션의 'API호출 IP' 설정에 이 값을 등록하세요. "
             "(Streamlit Cloud 서버 IP는 재배포/재시작 시 바뀔 수 있습니다)"
         )
+        ip_link_col1, ip_link_col2 = st.columns(2)
+        with ip_link_col1:
+            st.link_button(
+                "🔗 네이버 커머스 API 센터 바로가기",
+                "https://apicenter.commerce.naver.com",
+                use_container_width=True,
+            )
+        with ip_link_col2:
+            st.link_button(
+                "🔗 네이버 광고주센터 바로가기",
+                "https://ads.naver.com/",
+                use_container_width=True,
+            )
 
     DETAIL_FOOTER_URL = "https://gi.esmplus.com/fromarte/wholesale/order.png"
 
