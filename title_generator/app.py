@@ -1,4 +1,6 @@
 import base64
+import csv
+import datetime
 import hashlib
 import hmac
 import io
@@ -278,9 +280,14 @@ BANNER_MODEL_OPTIONS = {
 
 
 def fetch_gemini_banner_image(
-    image_png_bytes, prompt_text, model_name="gemini-3.1-flash-image", max_retries=3
+    image_png_bytes_list, prompt_text, model_name="gemini-3.1-flash-image", max_retries=3
 ):
     """Nano Banana 계열 모델로 배너컷 이미지를 생성한다.
+
+    여러 장의 참조 사진(image_png_bytes_list: bytes 리스트)을 함께 첨부할 수 있다.
+    컬러가 사진 한 장에 다 모여있지 않고 여러 장에 분산되어 있어도,
+    모델이 모든 사진을 함께 보고 각 컬러를 찾아 하나로 합성하도록 하기 위함.
+
     상품명 작성기(무료 등급)와 과금이 섞이지 않도록, 별도 유료 프로젝트의
     GEMINI_BANNER_API_KEY를 우선 사용하고 없으면 기존 키로 대체한다."""
     gemini_api_key = (
@@ -296,21 +303,19 @@ def fetch_gemini_banner_image(
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{model_name}:generateContent"
     )
-    image_b64 = base64.b64encode(image_png_bytes).decode("utf-8")
-    payload = {
-        "contents": [
+
+    parts = [{"text": prompt_text}]
+    for image_png_bytes in image_png_bytes_list:
+        parts.append(
             {
-                "parts": [
-                    {"text": prompt_text},
-                    {
-                        "inlineData": {
-                            "mimeType": "image/png",
-                            "data": image_b64,
-                        }
-                    },
-                ]
+                "inlineData": {
+                    "mimeType": "image/png",
+                    "data": base64.b64encode(image_png_bytes).decode("utf-8"),
+                }
             }
-        ],
+        )
+    payload = {
+        "contents": [{"parts": parts}],
         "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
     }
 
@@ -350,6 +355,56 @@ def fetch_gemini_banner_image(
         None,
         "응답에서 생성된 이미지를 찾지 못했습니다. (안전 필터에 의해 차단되었을 수 있습니다)",
     )
+
+
+def save_banner_generation_log(
+    colors: list, banner_style_label: str, banner_model_label: str, results: list
+):
+    """생성된 배너컷 이미지를 저장하고 로그를 기록한다.
+
+    logs/
+    ├── banner_log.csv (생성 기록)
+    └── banner_YYYYMMDD_HHMMSS/
+        ├── 색상1_배너스타일.jpg
+        ├── 색상2_배너스타일.jpg
+        └── 모듬_배너스타일.jpg
+    """
+    logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+    os.makedirs(logs_dir, exist_ok=True)
+
+    timestamp = datetime.datetime.now()
+    timestamp_str = timestamp.strftime("%Y%m%d_%H%M%S")
+    session_dir = os.path.join(logs_dir, f"banner_{timestamp_str}")
+    os.makedirs(session_dir, exist_ok=True)
+
+    saved_files = []
+    for item in results:
+        file_path = os.path.join(session_dir, item["filename"])
+        with open(file_path, "wb") as f:
+            f.write(item["data"])
+        saved_files.append(item["filename"])
+
+    log_file = os.path.join(logs_dir, "banner_log.csv")
+    log_row = {
+        "생성일시": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+        "배너스타일": banner_style_label,
+        "생성모델": banner_model_label,
+        "색상": ", ".join(colors),
+        "생성수량": len(results),
+        "저장폴더": session_dir,
+        "파일목록": "; ".join(saved_files),
+    }
+
+    try:
+        with open(log_file, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=log_row.keys())
+            if f.tell() == 0:
+                writer.writeheader()
+            writer.writerow(log_row)
+    except Exception as e:
+        print(f"로그 저장 실패: {e}")
+
+    return session_dir
 
 
 def _parse_text_align(raw_html):
@@ -2041,261 +2096,352 @@ with tab4:
 # TAB 5: 배너컷 생성기 (Nano Banana Pro)
 # ==================================================================
 with tab5:
-    st.subheader("🎯 배너컷 생성기 (Nano Banana)")
+    banner_tab1, banner_tab2 = st.tabs(["🎨 생성", "📋 생성 로그"])
 
-    style_col, model_col = st.columns(2)
-    with style_col:
-        banner_style_label = st.selectbox(
-            "배너 스타일 선택",
-            list(BANNER_STYLE_OPTIONS.keys()),
-            index=0,
-            key="banner_style_select",
-        )
-    banner_style = BANNER_STYLE_OPTIONS[banner_style_label]
+    with banner_tab1:
+        st.subheader("🎯 배너컷 생성기 (Nano Banana)")
 
-    st.caption(
-        f"여러 컬러가 모여있는 상품 모듬 사진을 올리면, 컬러별로 "
-        f"{banner_style_label} 배너컷을 만들어줍니다."
-    )
-
-    with model_col:
-        banner_model_label = st.selectbox(
-            "생성 모델 선택",
-            list(BANNER_MODEL_OPTIONS.keys()),
-            index=0,
-            key="banner_model_select",
-        )
-    banner_model_name = BANNER_MODEL_OPTIONS[banner_model_label]
-
-    BANNER_EXAMPLE_IMAGE_URL = "https://gi.esmplus.com/fromarte/wholesale/sample.png"
-    BANNER_BOX_HEIGHT = 430
-
-    upload_col, example_col = st.columns([1, 1])
-    with upload_col:
-        with st.container(border=True):
-            st.markdown("**📁 여기에 사진을 끌어다 놓으세요**")
-            st.caption("드래그 앤 드롭으로 올리거나, 클릭해서 파일을 선택할 수 있습니다.")
-            banner_uploaded = st.file_uploader(
-                "상품 모듬 사진 업로드",
-                type=["jpg", "jpeg", "png"],
-                key="banner_image_upload",
-                label_visibility="collapsed",
+        style_col, model_col = st.columns(2)
+        with style_col:
+            banner_style_label = st.selectbox(
+                "배너 스타일 선택",
+                list(BANNER_STYLE_OPTIONS.keys()),
+                index=0,
+                key="banner_style_select",
             )
+        banner_style = BANNER_STYLE_OPTIONS[banner_style_label]
+
+        st.caption(
+            f"여러 컬러가 모여있는 상품 모듬 사진을 올리면, 컬러별로 "
+            f"{banner_style_label} 배너컷을 만들어줍니다."
+        )
+
+        with model_col:
+            banner_model_label = st.selectbox(
+                "생성 모델 선택",
+                list(BANNER_MODEL_OPTIONS.keys()),
+                index=0,
+                key="banner_model_select",
+            )
+        banner_model_name = BANNER_MODEL_OPTIONS[banner_model_label]
+
+        BANNER_EXAMPLE_IMAGE_URL = "https://gi.esmplus.com/fromarte/wholesale/sample.png"
+        BANNER_BOX_HEIGHT = 430
+
+        upload_col, example_col = st.columns([1, 1])
+        with upload_col:
+            with st.container(border=True):
+                st.markdown("**📁 여기에 사진을 끌어다 놓으세요**")
+                st.caption(
+                    "배너컷 생성기에 드래그 앤 드롭으로 올리거나, 클릭해서 파일을 선택할 수 있습니다."
+                )
+                st.caption("하단에 여러장의 사진 업로드 가능")
+                banner_uploaded_files = st.file_uploader(
+                    "상품 사진 업로드 (여러 장 가능)",
+                    type=["jpg", "jpeg", "png"],
+                    key="banner_image_upload",
+                    label_visibility="collapsed",
+                    accept_multiple_files=True,
+                )
+                st.info(
+                    "💡 **여러 장 업로드 팁**: 컬러가 사진마다 나뉘어 있어도 괜찮습니다. "
+                    "Ctrl(또는 Cmd) + 클릭으로 여러 장을 선택한 후, 아래에서 원하는 색상을 선택해 생성하세요. "
+                    "모델이 모든 사진을 보고 각 색상을 찾아 하나로 합성합니다."
+                )
+                st.markdown(
+                    '<div style="height:250px;"></div>', unsafe_allow_html=True
+                )
+        with example_col:
             st.markdown(
-                '<div style="height:250px;"></div>', unsafe_allow_html=True
+                f"""
+                <div style="height:{BANNER_BOX_HEIGHT}px; border-radius:12px;
+                            overflow:hidden; border:1px solid rgba(128,128,128,0.3);">
+                    <img src="{BANNER_EXAMPLE_IMAGE_URL}"
+                         style="width:100%; height:100%; object-fit:cover;">
+                </div>
+                <p style="text-align:center; font-size:0.85em; color:gray; margin-top:6px;">
+                    예시: 이런 식으로 여러 색상이 모여있는 사진을 준비하세요
+                </p>
+                """,
+                unsafe_allow_html=True,
             )
-    with example_col:
-        st.markdown(
-            f"""
-            <div style="height:{BANNER_BOX_HEIGHT}px; border-radius:12px;
-                        overflow:hidden; border:1px solid rgba(128,128,128,0.3);">
-                <img src="{BANNER_EXAMPLE_IMAGE_URL}"
-                     style="width:100%; height:100%; object-fit:cover;">
-            </div>
-            <p style="text-align:center; font-size:0.85em; color:gray; margin-top:6px;">
-                예시: 이런 식으로 여러 색상이 모여있는 사진을 준비하세요
-            </p>
-            """,
-            unsafe_allow_html=True,
+
+        if "banner_colors" not in st.session_state:
+            st.session_state["banner_colors"] = [""]
+
+        BANNER_COLOR_PLACEHOLDER_EXAMPLES = ["베이지", "네이비", "그레이", "브라운"]
+
+        st.markdown("**색상 목록** (제품에 있는 색상 수만큼 추가/삭제하세요)")
+        for i in range(len(st.session_state["banner_colors"])):
+            col_input, col_del = st.columns([4, 1])
+            with col_input:
+                example_color = BANNER_COLOR_PLACEHOLDER_EXAMPLES[
+                    i % len(BANNER_COLOR_PLACEHOLDER_EXAMPLES)
+                ]
+                st.session_state["banner_colors"][i] = st.text_input(
+                    f"색상 {i + 1}",
+                    value=st.session_state["banner_colors"][i],
+                    key=f"banner_color_{i}",
+                    label_visibility="collapsed",
+                    placeholder=f"예: {example_color}",
+                )
+            with col_del:
+                if st.button(
+                    "삭제", key=f"banner_color_del_{i}", use_container_width=True
+                ):
+                    st.session_state["banner_colors"].pop(i)
+                    st.rerun()
+
+        if st.button("➕ 색상 추가", key="banner_color_add"):
+            st.session_state["banner_colors"].append("")
+            st.rerun()
+
+        st.markdown("---")
+
+        if "banner_generating" not in st.session_state:
+            st.session_state["banner_generating"] = False
+        if "banner_results" not in st.session_state:
+            st.session_state["banner_results"] = []
+
+        generate_clicked = st.button(
+            "🎨 배너컷 생성하기",
+            key="banner_generate_btn",
+            type="primary",
+            use_container_width=True,
+            disabled=st.session_state["banner_generating"],
         )
 
-    if "banner_colors" not in st.session_state:
-        st.session_state["banner_colors"] = [""]
+        if st.session_state["banner_generating"]:
+            st.info("⏳ 생성 중입니다. 완료될 때까지 버튼이 비활성화됩니다 (중복 생성 방지).")
 
-    BANNER_COLOR_PLACEHOLDER_EXAMPLES = ["베이지", "네이비", "그레이", "브라운"]
+        if generate_clicked:
+            st.session_state["banner_generating"] = True
+            st.session_state["banner_results"] = []
+            st.rerun()
 
-    st.markdown("**색상 목록** (제품에 있는 색상 수만큼 추가/삭제하세요)")
-    for i in range(len(st.session_state["banner_colors"])):
-        col_input, col_del = st.columns([4, 1])
-        with col_input:
-            example_color = BANNER_COLOR_PLACEHOLDER_EXAMPLES[
-                i % len(BANNER_COLOR_PLACEHOLDER_EXAMPLES)
-            ]
-            st.session_state["banner_colors"][i] = st.text_input(
-                f"색상 {i + 1}",
-                value=st.session_state["banner_colors"][i],
-                key=f"banner_color_{i}",
-                label_visibility="collapsed",
-                placeholder=f"예: {example_color}",
-            )
-        with col_del:
-            if st.button(
-                "삭제", key=f"banner_color_del_{i}", use_container_width=True
-            ):
-                st.session_state["banner_colors"].pop(i)
-                st.rerun()
-
-    if st.button("➕ 색상 추가", key="banner_color_add"):
-        st.session_state["banner_colors"].append("")
-        st.rerun()
-
-    st.markdown("---")
-
-    if "banner_generating" not in st.session_state:
-        st.session_state["banner_generating"] = False
-    if "banner_results" not in st.session_state:
-        st.session_state["banner_results"] = []
-
-    generate_clicked = st.button(
-        "🎨 배너컷 생성하기",
-        key="banner_generate_btn",
-        type="primary",
-        use_container_width=True,
-        disabled=st.session_state["banner_generating"],
-    )
-
-    if st.session_state["banner_generating"]:
-        st.info("⏳ 생성 중입니다. 완료될 때까지 버튼이 비활성화됩니다 (중복 생성 방지).")
-
-    if generate_clicked:
-        st.session_state["banner_generating"] = True
-        st.session_state["banner_results"] = []
-        st.rerun()
-
-    if st.session_state["banner_generating"]:
-        if banner_uploaded is None:
-            st.warning("⚠️ 먼저 상품 모듬 사진을 업로드해주세요.")
-        else:
-            colors = [c.strip() for c in st.session_state["banner_colors"] if c.strip()]
-            if not colors:
-                st.warning("⚠️ 색상을 최소 1개 이상 입력해주세요.")
+        if st.session_state["banner_generating"]:
+            if not banner_uploaded_files:
+                st.warning("⚠️ 먼저 상품 사진을 1장 이상 업로드해주세요.")
             else:
-                try:
-                    source_img = Image.open(banner_uploaded).convert("RGB")
-                    png_buf = io.BytesIO()
-                    source_img.save(png_buf, format="PNG")
-                    image_png_bytes = png_buf.getvalue()
-                except Exception as e:
-                    st.error(f"❌ 업로드한 이미지를 읽지 못했습니다: {e}")
-                    image_png_bytes = None
+                colors = [c.strip() for c in st.session_state["banner_colors"] if c.strip()]
+                if not colors:
+                    st.warning("⚠️ 색상을 최소 1개 이상 입력해주세요.")
+                else:
+                    try:
+                        image_png_bytes_list = []
+                        for uploaded_file in banner_uploaded_files:
+                            source_img = Image.open(uploaded_file).convert("RGB")
+                            png_buf = io.BytesIO()
+                            source_img.save(png_buf, format="PNG")
+                            image_png_bytes_list.append(png_buf.getvalue())
+                    except Exception as e:
+                        st.error(f"❌ 업로드한 이미지를 읽지 못했습니다: {e}")
+                        image_png_bytes_list = []
 
-                if image_png_bytes:
-                    results = []
-                    for idx, color in enumerate(colors):
-                        if idx > 0:
-                            time.sleep(3)
-                        with st.spinner(f"'{color}' 배너컷 생성 중..."):
-                            prompt_text = banner_style["template"].format(
-                                color=color
-                            )
-                            result_bytes, err = fetch_gemini_banner_image(
-                                image_png_bytes, prompt_text, banner_model_name
-                            )
-
-                        if err:
-                            st.error(f"❌ '{color}' 생성 실패: {err}")
-                            continue
-
-                        try:
-                            result_img = Image.open(io.BytesIO(result_bytes)).convert(
-                                "RGB"
-                            )
-                            result_img = result_img.resize(
-                                (1000, 1000), Image.LANCZOS
-                            )
-                            out_buf = io.BytesIO()
-                            result_img.save(out_buf, format="JPEG", quality=95)
-                            jpeg_bytes = out_buf.getvalue()
-                        except Exception as e:
-                            st.error(f"❌ '{color}' 이미지 처리 실패: {e}")
-                            continue
-
-                        safe_color = _safe_filename_token(color, f"color{idx + 1}")
-                        results.append(
-                            {
-                                "label": f"{color} 배너컷",
-                                "data": jpeg_bytes,
-                                "filename": f"banner_{safe_color}_{banner_style['tag']}.jpg",
-                            }
-                        )
-
-                    if len(colors) > 1:
-                        time.sleep(3)
-                        with st.spinner("전체 모듬 배너컷 생성 중..."):
-                            group_prompt_text = (
-                                banner_style["group_template"].format(
-                                    colors=_join_colors_for_prompt(colors)
+                    if image_png_bytes_list:
+                        results = []
+                        for idx, color in enumerate(colors):
+                            if idx > 0:
+                                time.sleep(3)
+                            with st.spinner(f"'{color}' 배너컷 생성 중..."):
+                                prompt_text = banner_style["template"].format(
+                                    color=color
                                 )
-                            )
-                            group_result_bytes, group_err = fetch_gemini_banner_image(
-                                image_png_bytes, group_prompt_text, banner_model_name
-                            )
+                                result_bytes, err = fetch_gemini_banner_image(
+                                    image_png_bytes_list, prompt_text, banner_model_name
+                                )
 
-                        if group_err:
-                            st.error(f"❌ 전체 모듬 배너컷 생성 실패: {group_err}")
-                        else:
+                            if err:
+                                st.error(f"❌ '{color}' 생성 실패: {err}")
+                                continue
+
                             try:
-                                group_img = Image.open(
-                                    io.BytesIO(group_result_bytes)
-                                ).convert("RGB")
-                                group_img = group_img.resize(
+                                result_img = Image.open(io.BytesIO(result_bytes)).convert(
+                                    "RGB"
+                                )
+                                result_img = result_img.resize(
                                     (1000, 1000), Image.LANCZOS
                                 )
-                                group_out_buf = io.BytesIO()
-                                group_img.save(
-                                    group_out_buf, format="JPEG", quality=95
-                                )
-                                results.append(
-                                    {
-                                        "label": "전체 모듬 배너컷",
-                                        "data": group_out_buf.getvalue(),
-                                        "filename": f"banner_all_colors_{banner_style['tag']}.jpg",
-                                    }
-                                )
+                                out_buf = io.BytesIO()
+                                result_img.save(out_buf, format="JPEG", quality=95)
+                                jpeg_bytes = out_buf.getvalue()
                             except Exception as e:
-                                st.error(f"❌ 전체 모듬 이미지 처리 실패: {e}")
+                                st.error(f"❌ '{color}' 이미지 처리 실패: {e}")
+                                continue
 
-                    st.session_state["banner_results"] = results
-                    st.session_state["banner_just_generated"] = True
+                            safe_color = _safe_filename_token(color, f"color{idx + 1}")
+                            results.append(
+                                {
+                                    "label": f"{color} 배너컷",
+                                    "data": jpeg_bytes,
+                                    "filename": f"banner_{safe_color}_{banner_style['tag']}.jpg",
+                                }
+                            )
 
-        st.session_state["banner_generating"] = False
-        st.rerun()
+                        if len(colors) > 1:
+                            time.sleep(3)
+                            with st.spinner("전체 모듬 배너컷 생성 중..."):
+                                group_prompt_text = (
+                                    banner_style["group_template"].format(
+                                        colors=_join_colors_for_prompt(colors)
+                                    )
+                                )
+                                group_result_bytes, group_err = fetch_gemini_banner_image(
+                                    image_png_bytes_list, group_prompt_text, banner_model_name
+                                )
 
-    banner_results = st.session_state["banner_results"]
-    if banner_results:
-        st.markdown("---")
-        st.success(f"✅ 총 {len(banner_results)}장 생성 완료!")
+                            if group_err:
+                                st.error(f"❌ 전체 모듬 배너컷 생성 실패: {group_err}")
+                            else:
+                                try:
+                                    group_img = Image.open(
+                                        io.BytesIO(group_result_bytes)
+                                    ).convert("RGB")
+                                    group_img = group_img.resize(
+                                        (1000, 1000), Image.LANCZOS
+                                    )
+                                    group_out_buf = io.BytesIO()
+                                    group_img.save(
+                                        group_out_buf, format="JPEG", quality=95
+                                    )
+                                    results.append(
+                                        {
+                                            "label": "전체 모듬 배너컷",
+                                            "data": group_out_buf.getvalue(),
+                                            "filename": f"banner_all_colors_{banner_style['tag']}.jpg",
+                                        }
+                                    )
+                                except Exception as e:
+                                    st.error(f"❌ 전체 모듬 이미지 처리 실패: {e}")
 
-        for i, item in enumerate(banner_results):
-            st.image(
-                item["data"], caption=item["label"], use_container_width=True
-            )
+                        st.session_state["banner_results"] = results
+                        st.session_state["banner_just_generated"] = True
+
+                        if results:
+                            save_banner_generation_log(
+                                colors, banner_style_label, banner_model_label, results
+                            )
+
+            st.session_state["banner_generating"] = False
+            st.rerun()
+
+        banner_results = st.session_state["banner_results"]
+        if banner_results:
+            st.markdown("---")
+            st.success(f"✅ 총 {len(banner_results)}장 생성 완료!")
+
+            for i, item in enumerate(banner_results):
+                st.image(
+                    item["data"], caption=item["label"], use_container_width=True
+                )
+                st.download_button(
+                    f"📥 {item['label']} 다운로드",
+                    data=item["data"],
+                    file_name=item["filename"],
+                    mime="image/jpeg",
+                    key=f"banner_download_{i}",
+                    use_container_width=True,
+                )
+
+            zip_buf = io.BytesIO()
+            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                for item in banner_results:
+                    zf.writestr(item["filename"], item["data"])
+            zip_bytes = zip_buf.getvalue()
+
+            if st.session_state.get("banner_just_generated"):
+                zip_b64 = base64.b64encode(zip_bytes).decode("utf-8")
+                components.html(
+                    f"""
+                    <a id="banner_auto_dl" style="display:none"
+                       href="data:application/zip;base64,{zip_b64}"
+                       download="banner_cuts_all.zip"></a>
+                    <script>
+                    document.getElementById('banner_auto_dl').click();
+                    </script>
+                    """,
+                    height=0,
+                )
+                st.session_state["banner_just_generated"] = False
+
             st.download_button(
-                f"📥 {item['label']} 다운로드",
-                data=item["data"],
-                file_name=item["filename"],
-                mime="image/jpeg",
-                key=f"banner_download_{i}",
+                "📦 전체 한꺼번에 다운로드 (ZIP)",
+                data=zip_bytes,
+                file_name="banner_cuts_all.zip",
+                mime="application/zip",
+                key="banner_download_zip",
+                type="primary",
                 use_container_width=True,
             )
 
-        zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for item in banner_results:
-                zf.writestr(item["filename"], item["data"])
-        zip_bytes = zip_buf.getvalue()
+    with banner_tab2:
+        st.subheader("📋 생성 로그")
 
-        if st.session_state.get("banner_just_generated"):
-            zip_b64 = base64.b64encode(zip_bytes).decode("utf-8")
-            components.html(
-                f"""
-                <a id="banner_auto_dl" style="display:none"
-                   href="data:application/zip;base64,{zip_b64}"
-                   download="banner_cuts_all.zip"></a>
-                <script>
-                document.getElementById('banner_auto_dl').click();
-                </script>
-                """,
-                height=0,
-            )
-            st.session_state["banner_just_generated"] = False
+        logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+        log_file = os.path.join(logs_dir, "banner_log.csv")
 
-        st.download_button(
-            "📦 전체 한꺼번에 다운로드 (ZIP)",
-            data=zip_bytes,
-            file_name="banner_cuts_all.zip",
-            mime="application/zip",
-            key="banner_download_zip",
-            type="primary",
-            use_container_width=True,
-        )
+        if not os.path.exists(log_file):
+            st.info("📭 아직 생성된 배너컷이 없습니다. '생성' 탭에서 생성해보세요!")
+        else:
+            df_log = pd.read_csv(log_file)
+            st.dataframe(df_log, use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.subheader("이미지 다시 다운로드")
+
+            for idx, row in df_log.iterrows():
+                session_dir = row["저장폴더"]
+                if os.path.exists(session_dir):
+                    with st.expander(
+                        f"📅 {row['생성일시']} | {row['배너스타일']} | {row['색상']}"
+                    ):
+                        col_left, col_right = st.columns([3, 1])
+
+                        with col_left:
+                            file_list = row["파일목록"].split("; ")
+                            st.caption(f"생성된 {len(file_list)}개 이미지")
+
+                            thumb_cols = st.columns(len(file_list))
+                            for thumb_idx, filename in enumerate(file_list):
+                                file_path = os.path.join(session_dir, filename)
+                                if os.path.exists(file_path):
+                                    with thumb_cols[thumb_idx]:
+                                        st.image(
+                                            file_path,
+                                            caption=filename.replace(
+                                                f"_{row['배너스타일'].split()[0]}_studio_white.jpg",
+                                                "",
+                                            ).replace("banner_", ""),
+                                            use_container_width=True,
+                                        )
+
+                        with col_right:
+                            for filename in file_list:
+                                file_path = os.path.join(session_dir, filename)
+                                if os.path.exists(file_path):
+                                    with open(file_path, "rb") as f:
+                                        st.download_button(
+                                            f"📥 {filename.split('_')[1]}",
+                                            data=f.read(),
+                                            file_name=filename,
+                                            mime="image/jpeg",
+                                            key=f"log_download_{idx}_{filename}",
+                                            use_container_width=True,
+                                        )
+
+                            zip_buffer = io.BytesIO()
+                            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                                for filename in file_list:
+                                    file_path = os.path.join(session_dir, filename)
+                                    if os.path.exists(file_path):
+                                        with open(file_path, "rb") as f:
+                                            zf.writestr(filename, f.read())
+
+                            st.download_button(
+                                "📦 전체",
+                                data=zip_buffer.getvalue(),
+                                file_name=f"banner_{row['생성일시'].replace(':', '-')}.zip",
+                                mime="application/zip",
+                                key=f"log_zip_{idx}",
+                                use_container_width=True,
+                            )
