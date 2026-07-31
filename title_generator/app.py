@@ -2228,9 +2228,17 @@ with tab5:
                     st.warning("⚠️ 색상을 최소 1개 이상 입력해주세요.")
                 else:
                     try:
+                        # 원본 해상도 그대로 여러 장을 API에 보내면 메모리 사용량이
+                        # 급증해 배포 서버가 강제 종료될 수 있어, 색상 판별에 지장 없는
+                        # 선에서 긴 변 1600px로 축소한 뒤 전송한다.
+                        MAX_BANNER_UPLOAD_DIMENSION = 1600
                         image_png_bytes_list = []
                         for uploaded_file in banner_uploaded_files:
                             source_img = Image.open(uploaded_file).convert("RGB")
+                            source_img.thumbnail(
+                                (MAX_BANNER_UPLOAD_DIMENSION, MAX_BANNER_UPLOAD_DIMENSION),
+                                Image.LANCZOS,
+                            )
                             png_buf = io.BytesIO()
                             source_img.save(png_buf, format="PNG")
                             image_png_bytes_list.append(png_buf.getvalue())
