@@ -2065,6 +2065,20 @@ with tab3:
                 use_container_width=True,
             )
 
+            components.html(
+                """
+                <div style="text-align:center; margin-top:8px;">
+                    <button onclick="window.parent.scrollTo({top:0, behavior:'smooth'});"
+                            style="padding:10px 20px; border-radius:8px; border:1px solid #d0d0d0;
+                                   background-color:#f0f2f6; color:#31333F; font-size:14px;
+                                   cursor:pointer; width:100%;">
+                        ⬆️ 맨 위로 이동
+                    </button>
+                </div>
+                """,
+                height=54,
+            )
+
 # ==================================================================
 # TAB 4: 도매마켓 바로가기
 # ==================================================================
