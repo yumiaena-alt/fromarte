@@ -2209,18 +2209,14 @@ with tab3:
                 height=0,
             )
 
-            components.html(
-                """
-                <div style="text-align:center; margin-top:8px;">
-                    <button id="scroll_to_top_btn_inline"
-                            style="padding:10px 20px; border-radius:8px; border:1px solid #d0d0d0;
-                                   background-color:#f0f2f6; color:#31333F; font-size:14px;
-                                   cursor:pointer; width:100%;">
-                        ⬆️ 맨 위로 이동
-                    </button>
-                </div>
-                <script>
-                document.getElementById('scroll_to_top_btn_inline').addEventListener('click', function () {
+            if st.button(
+                "⬆️ 맨 위로 이동",
+                key="scroll_to_top_native_btn",
+                use_container_width=True,
+            ):
+                components.html(
+                    """
+                    <script>
                     var doc = window.parent.document;
                     var candidates = [
                         doc.querySelector('[data-testid="stAppViewContainer"]'),
@@ -2236,11 +2232,10 @@ with tab3:
                         try { target.scrollTop = 0; } catch (e) {}
                         try { target.scrollTo(0, 0); } catch (e2) {}
                     });
-                });
-                </script>
-                """,
-                height=54,
-            )
+                    </script>
+                    """,
+                    height=0,
+                )
 
 # ==================================================================
 # TAB 4: 도매마켓 바로가기
