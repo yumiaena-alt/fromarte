@@ -381,9 +381,77 @@ def _join_colors_for_prompt(colors):
     return ", ".join(colors[:-1]) + f", and {colors[-1]}"
 
 
+# 한글 색상명을 파일명용 영문으로 옮기기 위한 표.
+# 파일명은 반드시 영문이어야 하는데, 한글을 그냥 제거하면 color1/color2 처럼
+# 알아볼 수 없는 이름이 되므로 자주 쓰는 색상은 영문으로 바꿔준다.
+# 긴 이름이 짧은 이름에 먼저 걸리지 않도록 조회 시 길이순으로 확인한다.
+COLOR_NAME_TO_ENGLISH = {
+    "흰색": "white",
+    "하얀색": "white",
+    "화이트": "white",
+    "검정": "black",
+    "검정색": "black",
+    "검은색": "black",
+    "블랙": "black",
+    "회색": "gray",
+    "그레이": "gray",
+    "남색": "navy",
+    "네이비": "navy",
+    "파랑": "blue",
+    "파란색": "blue",
+    "블루": "blue",
+    "하늘색": "skyblue",
+    "빨강": "red",
+    "빨간색": "red",
+    "레드": "red",
+    "분홍": "pink",
+    "분홍색": "pink",
+    "핑크": "pink",
+    "주황": "orange",
+    "주황색": "orange",
+    "오렌지": "orange",
+    "노랑": "yellow",
+    "노란색": "yellow",
+    "옐로우": "yellow",
+    "초록": "green",
+    "초록색": "green",
+    "green": "green",
+    "그린": "green",
+    "카키": "khaki",
+    "보라": "purple",
+    "보라색": "purple",
+    "퍼플": "purple",
+    "갈색": "brown",
+    "브라운": "brown",
+    "베이지": "beige",
+    "아이보리": "ivory",
+    "크림": "cream",
+    "은색": "silver",
+    "실버": "silver",
+    "금색": "gold",
+    "골드": "gold",
+    "민트": "mint",
+    "라벤더": "lavender",
+    "와인": "wine",
+    "버건디": "burgundy",
+    "차콜": "charcoal",
+    "연청": "lightdenim",
+    "진청": "darkdenim",
+}
+
+
 def _safe_filename_token(text, fallback):
-    """다운로드 파일명에 한글 등 비ASCII 문자가 섞이지 않도록 영문/숫자만 남긴다."""
-    cleaned = re.sub(r"[^A-Za-z0-9]", "", text)
+    """다운로드 파일명에 한글 등 비ASCII 문자가 섞이지 않도록 영문/숫자만 남긴다.
+
+    한글 색상명은 그냥 지우면 이름이 사라지므로, 먼저 영문으로 옮긴다.
+    (예: 흰색 -> white, 블랙2 -> black2)
+    """
+    converted = text
+    for korean in sorted(COLOR_NAME_TO_ENGLISH, key=len, reverse=True):
+        if korean in converted:
+            converted = converted.replace(korean, COLOR_NAME_TO_ENGLISH[korean])
+
+    cleaned = re.sub(r"[^A-Za-z0-9]", "", converted)
     return cleaned if cleaned else fallback
 
 
