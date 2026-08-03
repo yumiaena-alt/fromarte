@@ -10,7 +10,7 @@
 프롬아떼(도매 기반 이커머스 셀러)가 상품 등록·상세페이지 제작에 쓰는 **Streamlit 단일 페이지 웹앱**이다.
 탭 5개로 기능이 나뉘어 있고, Streamlit Community Cloud에 배포되어 브라우저에서 바로 쓴다.
 
-- **로컬 경로**: `C:\Claude\fromarte-repo`
+- **로컬 경로**: `C:\Claude\fromarte-commerce` (2026-08-03에 `fromarte-repo`에서 이름 변경됨)
 - **GitHub**: `https://github.com/yumiaena-alt/fromarte` (브랜치 `main`)
 - **배포 URL**: https://fromarte-9pmmpcfbggfbgu8vu4ufy7.streamlit.app
 - **배포 진입점**: `title_generator/app.py` ← **실제로 배포되는 유일한 파일**
