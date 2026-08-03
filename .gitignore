@@ -1,0 +1,10 @@
+# Streamlit 로컬 시크릿 — 절대 커밋하지 않는다
+.streamlit/secrets.toml
+**/.streamlit/secrets.toml
+
+# 배너컷 생성 로그 (런타임 생성물, 배포 환경에서는 휘발성)
+**/logs/
+
+# Python
+__pycache__/
+*.py[cod]
