@@ -9,7 +9,6 @@ import os
 import re
 import time
 import urllib.request
-import zipfile
 
 import bcrypt
 import google.generativeai as genai
@@ -2685,19 +2684,20 @@ with tab5:
                                             use_container_width=True,
                                         )
 
-                            zip_buffer = io.BytesIO()
-                            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                            if st.button(
+                                "📥 전체",
+                                key=f"log_download_all_{idx}",
+                                use_container_width=True,
+                            ):
+                                log_results = []
                                 for filename in file_list:
                                     file_path = os.path.join(session_dir, filename)
                                     if os.path.exists(file_path):
                                         with open(file_path, "rb") as f:
-                                            zf.writestr(filename, f.read())
-
-                            st.download_button(
-                                "📦 전체",
-                                data=zip_buffer.getvalue(),
-                                file_name=f"banner_{row['생성일시'].replace(':', '-')}.zip",
-                                mime="application/zip",
-                                key=f"log_zip_{idx}",
-                                use_container_width=True,
-                            )
+                                            log_results.append(
+                                                {
+                                                    "filename": filename,
+                                                    "data": f.read(),
+                                                }
+                                            )
+                                trigger_individual_image_downloads(log_results)
