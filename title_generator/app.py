@@ -546,7 +546,7 @@ def trigger_individual_image_downloads(results: list):
         (function () {
             var links = document.querySelectorAll('a.individual_dl');
             links.forEach(function (a, i) {
-                setTimeout(function () { a.click(); }, i * 600);
+                setTimeout(function () { a.click(); }, i * 900);
             });
         })();
         </script>
@@ -2644,16 +2644,36 @@ with tab5:
             st.markdown("---")
             st.subheader("이미지 다시 다운로드")
 
+            # 파일명은 한글을 못 담아 color1/color2 형태로 저장되므로,
+            # 화면에는 로그에 기록된 실제 색상명(예: 흰색, 핑크, 전체 모음)을 보여준다.
+            def _log_labels(row, file_list):
+                colors = [c.strip() for c in str(row["색상"]).split(",") if c.strip()]
+                labels = []
+                color_i = 0
+                for filename in file_list:
+                    if "all_colors" in filename:
+                        labels.append("전체 모음")
+                    elif color_i < len(colors):
+                        labels.append(colors[color_i])
+                        color_i += 1
+                    else:
+                        labels.append(filename)
+                return labels
+
+            download_request = None
+
             for idx, row in df_log.iterrows():
                 session_dir = row["저장폴더"]
                 if os.path.exists(session_dir):
                     with st.expander(
                         f"📅 {row['생성일시']} | {row['배너스타일']} | {row['색상']}"
                     ):
+                        file_list = row["파일목록"].split("; ")
+                        labels = _log_labels(row, file_list)
+
                         col_left, col_right = st.columns([3, 1])
 
                         with col_left:
-                            file_list = row["파일목록"].split("; ")
                             st.caption(f"생성된 {len(file_list)}개 이미지")
 
                             thumb_cols = st.columns(len(file_list))
@@ -2663,20 +2683,17 @@ with tab5:
                                     with thumb_cols[thumb_idx]:
                                         st.image(
                                             file_path,
-                                            caption=filename.replace(
-                                                f"_{row['배너스타일'].split()[0]}_studio_white.jpg",
-                                                "",
-                                            ).replace("banner_", ""),
+                                            caption=labels[thumb_idx],
                                             use_container_width=True,
                                         )
 
                         with col_right:
-                            for filename in file_list:
+                            for label_idx, filename in enumerate(file_list):
                                 file_path = os.path.join(session_dir, filename)
                                 if os.path.exists(file_path):
                                     with open(file_path, "rb") as f:
                                         st.download_button(
-                                            f"📥 {filename.split('_')[1]}",
+                                            f"📥 {labels[label_idx]}",
                                             data=f.read(),
                                             file_name=filename,
                                             mime="image/jpeg",
@@ -2684,20 +2701,28 @@ with tab5:
                                             use_container_width=True,
                                         )
 
+                            # 다운로드 실행은 expander 밖에서 처리한다.
+                            # expander가 접히면 안에 있는 컴포넌트가 실행되지 않아
+                            # 다운로드가 누락될 수 있기 때문이다.
                             if st.button(
-                                "📥 전체",
+                                f"📥 전체 {len(file_list)}장",
                                 key=f"log_download_all_{idx}",
                                 use_container_width=True,
                             ):
-                                log_results = []
-                                for filename in file_list:
-                                    file_path = os.path.join(session_dir, filename)
-                                    if os.path.exists(file_path):
-                                        with open(file_path, "rb") as f:
-                                            log_results.append(
-                                                {
-                                                    "filename": filename,
-                                                    "data": f.read(),
-                                                }
-                                            )
-                                trigger_individual_image_downloads(log_results)
+                                download_request = (session_dir, file_list)
+
+            if download_request is not None:
+                request_dir, request_files = download_request
+                log_results = []
+                for filename in request_files:
+                    file_path = os.path.join(request_dir, filename)
+                    if os.path.exists(file_path):
+                        with open(file_path, "rb") as f:
+                            log_results.append(
+                                {"filename": filename, "data": f.read()}
+                            )
+                trigger_individual_image_downloads(log_results)
+                st.caption(
+                    f"⬇️ {len(log_results)}장을 각각 저장하는 중입니다. "
+                    "브라우저가 '여러 파일 다운로드'를 물으면 허용해주세요."
+                )
