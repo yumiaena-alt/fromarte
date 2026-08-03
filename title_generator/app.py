@@ -157,6 +157,31 @@ components.html(
     height=0,
 )
 
+if st.session_state.get("_scroll_to_top_trigger"):
+    st.session_state["_scroll_to_top_trigger"] = False
+    components.html(
+        """
+        <script>
+        var doc = window.parent.document;
+        var candidates = [
+            doc.querySelector('[data-testid="stAppViewContainer"]'),
+            doc.querySelector('[data-testid="stMain"]'),
+            doc.querySelector('section.main'),
+            doc.scrollingElement,
+            doc.documentElement,
+            doc.body,
+            window.parent,
+        ];
+        candidates.forEach(function (target) {
+            if (!target) return;
+            try { target.scrollTop = 0; } catch (e) {}
+            try { target.scrollTo(0, 0); } catch (e2) {}
+        });
+        </script>
+        """,
+        height=0,
+    )
+
 # ------------------------------------------------------------------
 # 공통 데이터 로드 및 API 연동 함수
 # ------------------------------------------------------------------
@@ -2214,28 +2239,8 @@ with tab3:
                 key="scroll_to_top_native_btn",
                 use_container_width=True,
             ):
-                components.html(
-                    """
-                    <script>
-                    var doc = window.parent.document;
-                    var candidates = [
-                        doc.querySelector('[data-testid="stAppViewContainer"]'),
-                        doc.querySelector('[data-testid="stMain"]'),
-                        doc.querySelector('section.main'),
-                        doc.scrollingElement,
-                        doc.documentElement,
-                        doc.body,
-                        window.parent,
-                    ];
-                    candidates.forEach(function (target) {
-                        if (!target) return;
-                        try { target.scrollTop = 0; } catch (e) {}
-                        try { target.scrollTo(0, 0); } catch (e2) {}
-                    });
-                    </script>
-                    """,
-                    height=0,
-                )
+                st.session_state["_scroll_to_top_trigger"] = True
+                st.rerun()
 
 # ==================================================================
 # TAB 4: 도매마켓 바로가기
