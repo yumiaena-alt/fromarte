@@ -523,6 +523,39 @@ def save_banner_generation_log(
     return session_dir
 
 
+def trigger_individual_image_downloads(results: list):
+    """생성된 배너컷을 ZIP으로 묶지 않고 각각 개별 이미지 파일로 자동 다운로드한다.
+
+    브라우저가 동시 다운로드를 막지 않도록 약간의 간격을 두고 순차 실행한다.
+    (크롬은 첫 시도에서 '여러 파일 다운로드 허용' 확인을 물을 수 있다.)
+    """
+    if not results:
+        return
+
+    anchors = []
+    for item in results:
+        b64 = base64.b64encode(item["data"]).decode("utf-8")
+        anchors.append(
+            f'<a class="individual_dl" href="data:image/jpeg;base64,{b64}" '
+            f'download="{item["filename"]}"></a>'
+        )
+
+    components.html(
+        "".join(anchors)
+        + """
+        <script>
+        (function () {
+            var links = document.querySelectorAll('a.individual_dl');
+            links.forEach(function (a, i) {
+                setTimeout(function () { a.click(); }, i * 600);
+            });
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
 def _parse_text_align(raw_html):
     # 사용자 요청에 따라 원본 정렬과 상관없이 항상 중앙정렬로 렌더링한다.
     return "center"
@@ -2172,14 +2205,17 @@ with tab3:
                 st.code(f'<img src="{predicted_url}">', language=None)
 
             st.markdown("---")
-            st.download_button(
-                label="📥 완성된 상세페이지 다운로드 (영문 파일명)",
-                data=byte_im,
-                file_name=output_filename,
-                mime="image/jpeg",
-                key="detail_download_btn_bottom",
-                use_container_width=True,
-            )
+            # 아래 '맨 위로 이동' 버튼이 이 다운로드 버튼을 정확히 찾아
+            # 복제할 수 있도록 전용 컨테이너(st-key-...)로 감싼다.
+            with st.container(key="detail_bottom_actions"):
+                st.download_button(
+                    label="📥 완성된 상세페이지 다운로드 (영문 파일명)",
+                    data=byte_im,
+                    file_name=output_filename,
+                    mime="image/jpeg",
+                    key="detail_download_btn_bottom",
+                    use_container_width=True,
+                )
 
             detail_dl_b64 = base64.b64encode(byte_im).decode("utf-8")
             components.html(
@@ -2223,12 +2259,19 @@ with tab3:
                     function build() {
                         if (doc.getElementById('scroll_top_cloned_wrap')) { return true; }
 
-                        var wraps = doc.querySelectorAll('[data-testid="stDownloadButton"]');
-                        if (!wraps.length) { return false; }
-                        var dlWrap = wraps[wraps.length - 1];
+                        // 배너컷 탭 등 다른 곳의 다운로드 버튼을 잡지 않도록
+                        // 전용 컨테이너 안에서만 찾는다.
+                        var dlWrap = doc.querySelector(
+                            '.st-key-detail_bottom_actions [data-testid="stDownloadButton"]'
+                        );
+                        if (!dlWrap) { return false; }
 
                         var wrap = dlWrap.cloneNode(true);
                         wrap.id = 'scroll_top_cloned_wrap';
+                        wrap.removeAttribute('data-testid');
+                        wrap.querySelectorAll('[data-testid]').forEach(function (n) {
+                            n.removeAttribute('data-testid');
+                        });
 
                         var link = wrap.querySelector('a');
                         var btn = wrap.querySelector('button');
@@ -2265,12 +2308,21 @@ with tab3:
                         return true;
                     }
 
-                    if (build()) { return; }
+                    build();
                     var tries = 0;
                     var timer = setInterval(function () {
                         tries += 1;
                         if (build() || tries > 40) { clearInterval(timer); }
                     }, 150);
+
+                    // 재실행으로 DOM이 갱신되며 복제 버튼이 지워지면 다시 넣는다.
+                    if (!window.parent.__scrollTopCloneObserver) {
+                        var obs = new window.parent.MutationObserver(function () {
+                            if (!doc.getElementById('scroll_top_cloned_wrap')) { build(); }
+                        });
+                        obs.observe(doc.body, {childList: true, subtree: true});
+                        window.parent.__scrollTopCloneObserver = obs;
+                    }
                 })();
                 </script>
                 """,
@@ -2563,36 +2615,20 @@ with tab5:
                     use_container_width=True,
                 )
 
-            zip_buf = io.BytesIO()
-            with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                for item in banner_results:
-                    zf.writestr(item["filename"], item["data"])
-            zip_bytes = zip_buf.getvalue()
-
-            if st.session_state.get("banner_just_generated"):
-                zip_b64 = base64.b64encode(zip_bytes).decode("utf-8")
-                components.html(
-                    f"""
-                    <a id="banner_auto_dl" style="display:none"
-                       href="data:application/zip;base64,{zip_b64}"
-                       download="banner_cuts_all.zip"></a>
-                    <script>
-                    document.getElementById('banner_auto_dl').click();
-                    </script>
-                    """,
-                    height=0,
-                )
-                st.session_state["banner_just_generated"] = False
-
-            st.download_button(
-                "📦 전체 한꺼번에 다운로드 (ZIP)",
-                data=zip_bytes,
-                file_name="banner_cuts_all.zip",
-                mime="application/zip",
-                key="banner_download_zip",
+            download_all_clicked = st.button(
+                "📥 전체 한꺼번에 다운로드 (이미지 개별 저장)",
+                key="banner_download_all",
                 type="primary",
                 use_container_width=True,
             )
+            st.caption(
+                "ZIP 압축 없이 이미지 파일 그대로 각각 저장됩니다. "
+                "브라우저가 '여러 파일 다운로드'를 물으면 허용해주세요."
+            )
+
+            if st.session_state.get("banner_just_generated") or download_all_clicked:
+                st.session_state["banner_just_generated"] = False
+                trigger_individual_image_downloads(banner_results)
 
     with banner_tab2:
         st.subheader("📋 생성 로그")
