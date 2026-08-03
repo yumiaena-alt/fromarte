@@ -119,7 +119,7 @@ components.html(
             var topBtn = doc.createElement('button');
             topBtn.id = 'scroll_to_top_fab';
             topBtn.className = 'fromarte_fab';
-            topBtn.style.bottom = '24px';
+            topBtn.style.bottom = '144px';
             topBtn.title = '맨 위로 이동';
             topBtn.textContent = '⬆️';
             topBtn.addEventListener('click', function () {
@@ -156,31 +156,6 @@ components.html(
     """,
     height=0,
 )
-
-if st.session_state.get("_scroll_to_top_trigger"):
-    st.session_state["_scroll_to_top_trigger"] = False
-    components.html(
-        """
-        <script>
-        var doc = window.parent.document;
-        var candidates = [
-            doc.querySelector('[data-testid="stAppViewContainer"]'),
-            doc.querySelector('[data-testid="stMain"]'),
-            doc.querySelector('section.main'),
-            doc.scrollingElement,
-            doc.documentElement,
-            doc.body,
-            window.parent,
-        ];
-        candidates.forEach(function (target) {
-            if (!target) return;
-            try { target.scrollTop = 0; } catch (e) {}
-            try { target.scrollTo(0, 0); } catch (e2) {}
-        });
-        </script>
-        """,
-        height=0,
-    )
 
 # ------------------------------------------------------------------
 # 공통 데이터 로드 및 API 연동 함수
@@ -2222,7 +2197,7 @@ with tab3:
                     link.textContent = '📥';
                     link.href = 'data:image/jpeg;base64,{detail_dl_b64}';
                     link.download = '{output_filename}';
-                    link.style.bottom = '144px';
+                    link.style.bottom = '24px';
                     doc.body.appendChild(link);
 
                     if (window.parent.__fromarteRepositionFabs) {{
@@ -2234,13 +2209,73 @@ with tab3:
                 height=0,
             )
 
-            if st.button(
-                "⬆️ 맨 위로 이동",
-                key="scroll_to_top_native_btn",
-                use_container_width=True,
-            ):
-                st.session_state["_scroll_to_top_trigger"] = True
-                st.rerun()
+            # 맨 위로 이동 버튼.
+            # st.button을 쓰면 클릭할 때마다 스크립트가 전체 재실행되어
+            # 무거운 상세페이지 합성이 다시 돌면서 크게 버벅인다.
+            # 그래서 바로 위 다운로드 버튼의 DOM을 복제해(스타일 100% 일치)
+            # 클릭 시 서버 왕복 없이 클라이언트에서만 스크롤하도록 한다.
+            components.html(
+                """
+                <script>
+                (function () {
+                    var doc = window.parent.document;
+
+                    function build() {
+                        if (doc.getElementById('scroll_top_cloned_wrap')) { return true; }
+
+                        var wraps = doc.querySelectorAll('[data-testid="stDownloadButton"]');
+                        if (!wraps.length) { return false; }
+                        var dlWrap = wraps[wraps.length - 1];
+
+                        var wrap = dlWrap.cloneNode(true);
+                        wrap.id = 'scroll_top_cloned_wrap';
+
+                        var link = wrap.querySelector('a');
+                        var btn = wrap.querySelector('button');
+                        var el = btn || link;
+                        if (!el) { return false; }
+
+                        if (link) {
+                            link.removeAttribute('href');
+                            link.removeAttribute('download');
+                        }
+
+                        var labelEl = el.querySelector('p') || el.querySelector('span') || el;
+                        labelEl.textContent = '⬆️ 맨 위로 이동';
+
+                        el.addEventListener('click', function (ev) {
+                            ev.preventDefault();
+                            var targets = [
+                                doc.querySelector('[data-testid="stAppViewContainer"]'),
+                                doc.querySelector('[data-testid="stMain"]'),
+                                doc.querySelector('section.main'),
+                                doc.scrollingElement,
+                                doc.documentElement,
+                                doc.body,
+                                window.parent,
+                            ];
+                            targets.forEach(function (t) {
+                                if (!t) return;
+                                try { t.scrollTop = 0; } catch (e) {}
+                                try { t.scrollTo(0, 0); } catch (e2) {}
+                            });
+                        });
+
+                        dlWrap.parentNode.insertBefore(wrap, dlWrap.nextSibling);
+                        return true;
+                    }
+
+                    if (build()) { return; }
+                    var tries = 0;
+                    var timer = setInterval(function () {
+                        tries += 1;
+                        if (build() || tries > 40) { clearInterval(timer); }
+                    }, 150);
+                })();
+                </script>
+                """,
+                height=0,
+            )
 
 # ==================================================================
 # TAB 4: 도매마켓 바로가기
