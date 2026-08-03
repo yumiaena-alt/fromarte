@@ -41,6 +41,63 @@ st.markdown(
 st.title("🛍️ 프롬아떼 스마트 커머스 툴")
 st.write("원하시는 기능을 상단 탭에서 선택하여 사용하세요.")
 
+components.html(
+    """
+    <script>
+    (function () {
+        var doc = window.parent.document;
+        if (doc.getElementById('scroll_to_top_fab')) { return; }
+
+        var style = doc.createElement('style');
+        style.textContent = `
+            #scroll_to_top_fab {
+                position: fixed;
+                right: 24px;
+                bottom: 24px;
+                z-index: 9999;
+                width: 48px;
+                height: 48px;
+                border-radius: 50%;
+                border: 1px solid #d0d0d0;
+                background-color: #f0f2f6;
+                color: #31333F;
+                font-size: 20px;
+                cursor: pointer;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            }
+            #scroll_to_top_fab:hover {
+                background-color: #e0e2e6;
+            }
+        `;
+        doc.head.appendChild(style);
+
+        var btn = doc.createElement('button');
+        btn.id = 'scroll_to_top_fab';
+        btn.title = '맨 위로 이동';
+        btn.textContent = '⬆️';
+        btn.addEventListener('click', function () {
+            var candidates = [
+                doc.querySelector('[data-testid="stAppViewContainer"]'),
+                doc.querySelector('[data-testid="stMain"]'),
+                doc.querySelector('section.main'),
+                doc.scrollingElement,
+                doc.documentElement,
+                doc.body,
+                window.parent,
+            ];
+            candidates.forEach(function (target) {
+                if (!target) return;
+                try { target.scrollTop = 0; } catch (e) {}
+                try { target.scrollTo(0, 0); } catch (e2) {}
+            });
+        });
+        doc.body.appendChild(btn);
+    })();
+    </script>
+    """,
+    height=0,
+)
+
 # ------------------------------------------------------------------
 # 공통 데이터 로드 및 API 연동 함수
 # ------------------------------------------------------------------
@@ -2065,18 +2122,43 @@ with tab3:
                 use_container_width=True,
             )
 
+            detail_dl_b64 = base64.b64encode(byte_im).decode("utf-8")
             components.html(
-                """
-                <div style="text-align:center; margin-top:8px;">
-                    <button onclick="window.parent.scrollTo({top:0, behavior:'smooth'});"
-                            style="padding:10px 20px; border-radius:8px; border:1px solid #d0d0d0;
-                                   background-color:#f0f2f6; color:#31333F; font-size:14px;
-                                   cursor:pointer; width:100%;">
-                        ⬆️ 맨 위로 이동
-                    </button>
-                </div>
+                f"""
+                <script>
+                (function () {{
+                    var doc = window.parent.document;
+                    var old = doc.getElementById('detail_download_fab');
+                    if (old) {{ old.remove(); }}
+
+                    var link = doc.createElement('a');
+                    link.id = 'detail_download_fab';
+                    link.title = '상세페이지 다운로드';
+                    link.textContent = '📥';
+                    link.href = 'data:image/jpeg;base64,{detail_dl_b64}';
+                    link.download = '{output_filename}';
+                    link.style.position = 'fixed';
+                    link.style.right = '24px';
+                    link.style.bottom = '84px';
+                    link.style.zIndex = '9999';
+                    link.style.width = '48px';
+                    link.style.height = '48px';
+                    link.style.borderRadius = '50%';
+                    link.style.border = '1px solid #d0d0d0';
+                    link.style.backgroundColor = '#f0f2f6';
+                    link.style.color = '#31333F';
+                    link.style.fontSize = '20px';
+                    link.style.cursor = 'pointer';
+                    link.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+                    link.style.display = 'flex';
+                    link.style.alignItems = 'center';
+                    link.style.justifyContent = 'center';
+                    link.style.textDecoration = 'none';
+                    doc.body.appendChild(link);
+                }})();
+                </script>
                 """,
-                height=54,
+                height=0,
             )
 
 # ==================================================================
